@@ -12,343 +12,186 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Vivra App',
+      title: 'Vivra',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         scaffoldBackgroundColor: const Color(0xFFFDF8F5), // Fondo crema de la web
         colorScheme: ColorScheme.fromSeed(
           seedColor: const Color(0xFFC76A28), // Terracota de la web
           primary: const Color(0xFFC76A28),
-          secondary: const Color(0xFFDDA15E), // Arena suave de la web
+          secondary: const Color(0xFFDDA15E),
         ),
         useMaterial3: true,
       ),
-      home: const LoginScreen(),
+      home: const MainNavigationShell(),
     );
   }
 }
 
 // -----------------------------------------------------------------
-// PANTALLA DE INICIAR SESIÓN
+// SHELL CON NAVEGACIÓN INFERIOR (BOTTOM NAVIGATION BAR)
 // -----------------------------------------------------------------
-class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key});
+class MainNavigationShell extends StatefulWidget {
+  const MainNavigationShell({super.key});
 
   @override
-  State<LoginScreen> createState() => _LoginScreenState();
+  State<MainNavigationShell> createState() => _MainNavigationShellState();
 }
 
-class _LoginScreenState extends State<LoginScreen> {
-  final _emailController = TextEditingController();
-  final _passwordController = TextEditingController();
-  final _dio = Dio();
-  final _storage = const FlutterSecureStorage();
-  bool _isLoading = false;
+class _MainNavigationShellState extends State<MainNavigationShell> {
+  int _currentIndex = 0;
+  final storage = const FlutterSecureStorage();
+  bool _isLoggedIn = false;
+  String? _userToken;
+  
+  // IP de tu servidor Ubuntu
+  final String _baseUrl = 'https://vivra-915z.onrender.com/api';
+  final List<String> _favoritosLocales = [];
 
-  final String _baseUrl = 'http://192.168.0.76:8000/api';
-
-  Future<void> _login() async {
-    if (_emailController.text.isEmpty || _passwordController.text.isEmpty) {
-      _showSnackBar('Por favor, llena todos los campos', Colors.amber);
-      return;
-    }
-
-    setState(() {
-      _isLoading = true;
-    });
-
-    try {
-      final response = await _dio.post(
-        '$_baseUrl/login',
-        data: {
-          'email': _emailController.text.trim(),
-          'password': _passwordController.text,
-        },
-        options: Options(headers: {'Accept': 'application/json'}),
-      );
-
-      if (response.statusCode == 200) {
-        String token = response.data['token'];
-        await _storage.write(key: 'auth_token', value: token);
-        
-        if (mounted) {
-          _showSnackBar('¡Bienvenido a Vivra!', Colors.green);
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(builder: (context) => HomeScreen(isGuest: false, baseUrl: _baseUrl)),
-          );
-        }
-      }
-    } on DioException catch (e) {
-      String errorMessage = 'Error al conectar con el servidor';
-      if (e.response != null) {
-        errorMessage = e.response?.data['message'] ?? 'Credenciales incorrectas';
-      }
-      _showSnackBar(errorMessage, Colors.red);
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
-    }
+  @override
+  void initState() {
+    super.initState();
+    _checkAuthStatus();
   }
 
-  void _showSnackBar(String message, Color color) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message), backgroundColor: color),
-    );
+  Future<void> _checkAuthStatus() async {
+    String? token = await storage.read(key: 'auth_token');
+    setState(() {
+      _userToken = token;
+      _isLoggedIn = token != null && token.isNotEmpty;
+    });
+  }
+
+  void _onLoginSuccess(String token) async {
+    await storage.write(key: 'auth_token', value: token);
+    setState(() {
+      _userToken = token;
+      _isLoggedIn = true;
+      _currentIndex = 0; // Regresa a la pestaña de Explora al iniciar sesión
+    });
+  }
+
+  void _onLogout() async {
+    await storage.delete(key: 'auth_token');
+    setState(() {
+      _userToken = null;
+      _isLoggedIn = false;
+      _currentIndex = 0;
+    });
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: SingleChildScrollView(
-        child: Padding(
-          padding: const EdgeInsets.all(24.0),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const SizedBox(height: 100),
-              Icon(Icons.local_activity, size: 80, color: const Color(0xFFC76A28)),
-              const SizedBox(height: 16),
-              const Text(
-                'Vivra',
-                style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: Color(0xFFC76A28)),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 40),
-              const Text(
-                'Ingresa tus credenciales',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 24),
-              TextField(
-                controller: _emailController,
-                decoration: const InputDecoration(
-                  labelText: 'Correo Electrónico',
-                  border: OutlineInputBorder(),
-                  prefixIcon: Icon(Icons.email),
-                ),
-                keyboardType: TextInputType.emailAddress,
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: _passwordController,
-                decoration: const InputDecoration(
-                  labelText: 'Contraseña',
-                  border: OutlineInputBorder(),
-                  prefixIcon: Icon(Icons.lock),
-                ),
-                obscureText: true,
-              ),
-              const SizedBox(height: 24),
-              _isLoading
-                  ? const Center(child: CircularProgressIndicator())
-                  : ElevatedButton(
-                      onPressed: _login,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Theme.of(context).colorScheme.primary,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                      ),
-                      child: const Text('Ingresar', style: TextStyle(fontSize: 16)),
-                    ),
-              const SizedBox(height: 12),
-              TextButton(
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (context) => RegisterScreen(baseUrl: _baseUrl)),
-                  );
-                },
-                child: const Text('¿No tienes cuenta? Regístrate aquí', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
-              ),
-              TextButton(
-                onPressed: () {
-                  Navigator.pushReplacement(
-                    context,
-                    MaterialPageRoute(builder: (context) => HomeScreen(isGuest: true, baseUrl: _baseUrl)),
-                  );
-                },
-                child: const Text('Entrar como Invitado', style: TextStyle(fontSize: 15, color: Colors.blueGrey)),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// -----------------------------------------------------------------
-// PANTALLA DE REGISTRO
-// -----------------------------------------------------------------
-class RegisterScreen extends StatefulWidget {
-  final String baseUrl;
-  const RegisterScreen({super.key, required this.baseUrl});
-
-  @override
-  State<RegisterScreen> createState() => _RegisterScreenState();
-}
-
-class _RegisterScreenState extends State<RegisterScreen> {
-  final _nameController = TextEditingController();
-  final _emailController = TextEditingController();
-  final _passwordController = TextEditingController();
-  final _dio = Dio();
-  bool _isLoading = false;
-
-  Future<void> _register() async {
-    if (_nameController.text.isEmpty || _emailController.text.isEmpty || _passwordController.text.isEmpty) {
-      _showSnackBar('Por favor, completa todos los campos', Colors.amber);
-      return;
-    }
-
-    setState(() {
-      _isLoading = true;
-    });
-
-    try {
-      final response = await _dio.post(
-        '${widget.baseUrl}/registro',
-        data: {
-          'name': _nameController.text.trim(),
-          'email': _emailController.text.trim(),
-          'password': _passwordController.text,
-          'role': 'turista', 
+    final List<Widget> pages = [
+      // 1. Explora
+      ExploreTab(
+        baseUrl: _baseUrl,
+        favoritosLocales: _favoritosLocales,
+        isLoggedIn: _isLoggedIn,
+        onFavoriteToggle: (id) {
+          setState(() {
+            _favoritosLocales.contains(id)
+                ? _favoritosLocales.remove(id)
+                : _favoritosLocales.add(id);
+          });
         },
-        options: Options(headers: {'Accept': 'application/json'}),
-      );
+      ),
+      // 2. Favoritos
+      FavoritesTab(
+        baseUrl: _baseUrl,
+        favoritosLocales: _favoritosLocales,
+      ),
+      // 3. Reservaciones
+      ReservationsTab(
+        isLoggedIn: _isLoggedIn,
+        onGoToLogin: () => setState(() => _currentIndex = 4),
+      ),
+      // 4. Mensajes
+      MessagesTab(
+        isLoggedIn: _isLoggedIn,
+        onGoToLogin: () => setState(() => _currentIndex = 4),
+      ),
+      // 5. Perfil / Iniciar Sesión
+      _isLoggedIn
+          ? ProfileTab(onLogout: _onLogout)
+          : LoginTab(baseUrl: _baseUrl, onLoginSuccess: _onLoginSuccess),
+    ];
 
-      if (response.statusCode == 201 || response.statusCode == 200) {
-        if (mounted) {
-          _showSnackBar('Cuenta creada con éxito. ¡Ya puedes iniciar sesión!', Colors.green);
-          Navigator.pop(context); 
-        }
-      }
-    } on DioException catch (e) {
-      String errorMessage = 'Error al registrar usuario';
-      if (e.response != null) {
-        errorMessage = e.response?.data['message'] ?? 'Los datos ingresados no son válidos';
-      }
-      _showSnackBar(errorMessage, Colors.red);
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
-    }
-  }
-
-  void _showSnackBar(String message, Color color) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message), backgroundColor: color),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Crear Cuenta'),
-        backgroundColor: Theme.of(context).colorScheme.primary,
-        foregroundColor: Colors.white,
+      body: IndexedStack(
+        index: _currentIndex,
+        children: pages,
       ),
-      body: SingleChildScrollView(
-        child: Padding(
-          padding: const EdgeInsets.all(24.0),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const SizedBox(height: 20),
-              const Text(
-                'Regístrate como Turista',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                'Explora y reserva las mejores experiencias de Oaxaca.',
-                style: TextStyle(fontSize: 14, color: Colors.grey),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 28),
-              TextField(
-                controller: _nameController,
-                decoration: const InputDecoration(
-                  labelText: 'Nombre Completo',
-                  border: OutlineInputBorder(),
-                  prefixIcon: Icon(Icons.person),
-                ),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: _emailController,
-                decoration: const InputDecoration(
-                  labelText: 'Correo Electrónico',
-                  border: OutlineInputBorder(),
-                  prefixIcon: Icon(Icons.email),
-                ),
-                keyboardType: TextInputType.emailAddress,
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: _passwordController,
-                decoration: const InputDecoration(
-                  labelText: 'Contraseña',
-                  border: OutlineInputBorder(),
-                  prefixIcon: Icon(Icons.lock),
-                ),
-                obscureText: true,
-              ),
-              const SizedBox(height: 28),
-              _isLoading
-                  ? const Center(child: CircularProgressIndicator())
-                  : ElevatedButton(
-                      onPressed: _register,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Theme.of(context).colorScheme.primary,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                      ),
-                      child: const Text('Registrarse', style: TextStyle(fontSize: 16)),
-                    ),
-            ],
+      bottomNavigationBar: BottomNavigationBar(
+        currentIndex: _currentIndex,
+        onTap: (index) {
+          _checkAuthStatus();
+          setState(() {
+            _currentIndex = index;
+          });
+        },
+        type: BottomNavigationBarType.fixed,
+        selectedItemColor: Theme.of(context).colorScheme.primary,
+        unselectedItemColor: Colors.grey[600],
+        selectedFontSize: 12,
+        unselectedFontSize: 12,
+        items: const [
+          BottomNavigationBarItem(
+            icon: Icon(Icons.search),
+            label: 'Explora',
           ),
-        ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.favorite_border),
+            activeIcon: Icon(Icons.favorite, color: Colors.red),
+            label: 'Favoritos',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.confirmation_number_outlined),
+            label: 'Reservas',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.chat_bubble_outline),
+            label: 'Mensajes',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.person_outline),
+            label: 'Perfil',
+          ),
+        ],
       ),
     );
   }
 }
 
 // -----------------------------------------------------------------
-// PANTALLA PRINCIPAL CON BÚSQUEDA Y CALIFICACIONES CALCULADAS
+// PESTAÑA 1: EXPLORA (PANTALLA PRINCIPAL)
 // -----------------------------------------------------------------
-class HomeScreen extends StatefulWidget {
-  final bool isGuest;
+class ExploreTab extends StatefulWidget {
   final String baseUrl;
-  const HomeScreen({super.key, required this.isGuest, required this.baseUrl});
+  final List<String> favoritosLocales;
+  final Function(String) onFavoriteToggle;
+  final bool isLoggedIn;
+
+  const ExploreTab({
+    super.key,
+    required this.baseUrl,
+    required this.favoritosLocales,
+    required this.onFavoriteToggle,
+    required this.isLoggedIn,
+  });
 
   @override
-  State<HomeScreen> createState() => _HomeScreenState();
+  State<ExploreTab> createState() => _ExploreTabState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _ExploreTabState extends State<ExploreTab> {
   final Dio _dio = Dio();
   final _searchController = TextEditingController();
 
   List<dynamic> _allExperiences = [];
   List<dynamic> _filteredExperiences = [];
-  Map<String, Map<String, dynamic>> _ratingsMap = {}; // Guardará { experience_id: { 'promedio': 4.5, 'total': 10 } }
-  
   bool _loading = true;
   String _selectedCategory = 'Todos';
-  final List<String> _favoritosLocales = [];
   final List<String> _categories = ['Todos', 'Gastronomía', 'Artesanías', 'Aventura'];
 
   @override
@@ -357,71 +200,88 @@ class _HomeScreenState extends State<HomeScreen> {
     _fetchData();
   }
 
-  // Carga paralela de experiencias y reseñas desde tu servidor Ubuntu
   Future<void> _fetchData() async {
     try {
-      // 1. Obtener Experiencias
+      // ⏱️ Timeout de 5 segundos para evitar bloqueos
+      _dio.options.connectTimeout = const Duration(seconds: 5);
+      _dio.options.receiveTimeout = const Duration(seconds: 5);
+
       final expResponse = await _dio.get('${widget.baseUrl}/experiencias');
-      
-      // 2. Obtener todas las Reseñas para calcular los promedios
-      List<dynamic> allReviews = [];
-      try {
-        final reviewResponse = await _dio.get('${widget.baseUrl}/reseñas');
-        if (reviewResponse.statusCode == 200) {
-          allReviews = reviewResponse.data;
-        }
-      } catch (e) {
-        print('Nota: El endpoint /reseñas falló o no tiene datos aún.');
-      }
-
-      // 3. Procesar y agrupar calificaciones por ID de experiencia
-      Map<String, List<double>> rawRatings = {};
-      for (var review in allReviews) {
-        String? expId = (review['experience_id'] ?? review['experiencia_id'])?.toString();
-        var puntuacionRaw = review['puntuacion'] ?? review['rating'];
-        if (expId != null && puntuacionRaw != null) {
-          double score = double.tryParse(puntuacionRaw.toString()) ?? 0.0;
-          rawRatings.putIfAbsent(expId, () => []).add(score);
-        }
-      }
-
-      // 4. Calcular los promedios reales
-      Map<String, Map<String, dynamic>> calculatedRatings = {};
-      rawRatings.forEach((expId, scores) {
-        double sum = scores.reduce((a, b) => a + b);
-        double avg = sum / scores.length;
-        calculatedRatings[expId] = {
-          'promedio': double.parse(avg.toStringAsFixed(2)),
-          'total': scores.length
-        };
-      });
 
       if (expResponse.statusCode == 200) {
-        setState(() {
-          _allExperiences = expResponse.data;
-          _filteredExperiences = expResponse.data;
-          _ratingsMap = calculatedRatings;
-          _loading = false;
-        });
+        dynamic responseData = expResponse.data;
+        List<dynamic> extractedList = [];
+
+        if (responseData is List) {
+          extractedList = responseData;
+        } else if (responseData is Map && responseData['data'] is List) {
+          extractedList = responseData['data'];
+        }
+
+        extractedList = extractedList.where((exp) {
+          var active = exp['active'] ?? exp['activo'] ?? exp['status'];
+          if (active == null) return true;
+          if (active is bool) return active;
+          if (active is int) return active == 1;
+          if (active is String) {
+            String a = active.toLowerCase();
+            return a == '1' || a == 'active' || a == 'activa';
+          }
+          return true;
+        }).toList();
+
+        if (mounted) {
+          setState(() {
+            _allExperiences = extractedList;
+            _filteredExperiences = extractedList;
+            _loading = false;
+          });
+        }
       }
     } catch (e) {
-      setState(() {
-        _loading = false;
-      });
+      debugPrint('❌ Error conectando a la API: $e');
+      if (mounted) {
+        setState(() => _loading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No se pudo conectar con el servidor local.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 
-  // Lógica de filtrado combinado (Búsqueda por texto + Categorías)
+  String _normalizeText(String text) {
+    return text
+        .toLowerCase()
+        .replaceAll(RegExp(r'[áàäâ]'), 'a')
+        .replaceAll(RegExp(r'[éèëê]'), 'e')
+        .replaceAll(RegExp(r'[íìïî]'), 'i')
+        .replaceAll(RegExp(r'[óòöô]'), 'o')
+        .replaceAll(RegExp(r'[úùüû]'), 'u');
+  }
+
   void _filterExperiences() {
-    String query = _searchController.text.toLowerCase();
+    String query = _normalizeText(_searchController.text);
+    String selCatNormalized = _normalizeText(_selectedCategory);
+
     setState(() {
       _filteredExperiences = _allExperiences.where((exp) {
-        final title = exp['titulo']?.toString().toLowerCase() ?? '';
-        final desc = exp['descripcion']?.toString().toLowerCase() ?? '';
-        final cat = exp['categoria']?.toString().toLowerCase() ?? '';
+        final title = _normalizeText(exp['name'] ?? exp['titulo'] ?? '');
+        final desc = _normalizeText(exp['description'] ?? exp['descripcion'] ?? '');
+        
+        var catObj = exp['category'] ?? exp['categoria'];
+        String catName = '';
+        if (catObj is Map) {
+          catName = _normalizeText(catObj['name'] ?? catObj['nombre'] ?? '');
+        } else {
+          catName = _normalizeText(catObj?.toString() ?? '');
+        }
 
-        bool matchesSearch = title.contains(query) || desc.contains(query);
-        bool matchesCategory = _selectedCategory == 'Todos' || cat.contains(_selectedCategory.toLowerCase().substring(0, 5));
+        bool matchesSearch = query.isEmpty || title.contains(query) || desc.contains(query);
+        bool matchesCategory = _selectedCategory == 'Todos' ||
+            catName.contains(selCatNormalized.substring(0, selCatNormalized.length > 4 ? 4 : selCatNormalized.length));
 
         return matchesSearch && matchesCategory;
       }).toList();
@@ -430,433 +290,442 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.isGuest ? 'Vivra - Invitado' : 'Vivra - Turista'),
-        backgroundColor: Theme.of(context).colorScheme.primary,
-        foregroundColor: Colors.white,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.exit_to_app),
-            onPressed: () {
-              const FlutterSecureStorage().delete(key: 'auth_token');
-              Navigator.pushReplacement(
-                context,
-                MaterialPageRoute(builder: (context) => const LoginScreen()),
-              );
-            },
-          )
-        ],
-      ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : Column(
-              children: [
-                // 🔍 1. BARRA DE BÚSQUEDA REAL 
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(30),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.06),
-                          blurRadius: 10,
-                          offset: const Offset(0, 5),
+    return SafeArea(
+      child: Scaffold(
+        body: _loading
+            ? const Center(child: CircularProgressIndicator())
+            : Column(
+                children: [
+                  // 🔍 Barra de Búsqueda
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(30),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.06),
+                            blurRadius: 10,
+                            offset: const Offset(0, 5),
+                          ),
+                        ],
+                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: TextField(
+                        controller: _searchController,
+                        onChanged: (_) => _filterExperiences(),
+                        decoration: const InputDecoration(
+                          hintText: 'Empieza la búsqueda...',
+                          prefixIcon: Icon(Icons.search, color: Colors.black87),
+                          border: InputBorder.none,
+                          contentPadding: EdgeInsets.symmetric(vertical: 14),
                         ),
-                      ],
-                    ),
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: TextField(
-                      controller: _searchController,
-                      onChanged: (_) => _filterExperiences(),
-                      decoration: const InputDecoration(
-                        hintText: 'Empieza la búsqueda...',
-                        prefixIcon: Icon(Icons.search, color: Colors.black87),
-                        border: InputBorder.none,
-                        contentPadding: EdgeInsets.symmetric(vertical: 14),
                       ),
                     ),
                   ),
-                ),
 
-                // 🏷️ 2. Filtros de categorías
-                Container(
-                  height: 60,
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  child: ListView.builder(
-                    scrollDirection: Axis.horizontal,
-                    itemCount: _categories.length,
-                    itemBuilder: (context, index) {
-                      final cat = _categories[index];
-                      final isSelected = _selectedCategory == cat;
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 8.0),
-                        child: ChoiceChip(
-                          label: Text(cat),
-                          selected: isSelected,
-                          onSelected: (_) {
-                            setState(() {
-                              _selectedCategory = cat;
-                            });
-                            _filterExperiences();
-                          },
-                          selectedColor: Theme.of(context).colorScheme.primary,
-                          labelStyle: TextStyle(color: isSelected ? Colors.white : Colors.black87),
-                        ),
-                      );
-                    },
+                  // 🏷️ Categorías
+                  Container(
+                    height: 55,
+                    padding: const EdgeInsets.symmetric(vertical: 6),
+                    child: ListView.builder(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: _categories.length,
+                      itemBuilder: (context, index) {
+                        final cat = _categories[index];
+                        final isSelected = _selectedCategory == cat;
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 6.0),
+                          child: ChoiceChip(
+                            label: Text(cat),
+                            selected: isSelected,
+                            onSelected: (_) {
+                              setState(() => _selectedCategory = cat);
+                              _filterExperiences();
+                            },
+                            selectedColor: Theme.of(context).colorScheme.primary,
+                            labelStyle: TextStyle(color: isSelected ? Colors.white : Colors.black87),
+                          ),
+                        );
+                      },
+                    ),
                   ),
-                ),
 
-                // 🏞️ 3. Feed de Tarjetas Grandes estilo Airbnb
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Popular entre los viajeros de tu zona',
-                          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.black87),
-                        ),
-                        const SizedBox(height: 12),
-                        Expanded(
-                          child: _filteredExperiences.isEmpty
-                              ? const Center(child: Text('No se encontraron experiencias.'))
-                              : ListView.builder(
-                                  itemCount: _filteredExperiences.length,
-                                  itemBuilder: (context, index) {
-                                    final exp = _filteredExperiences[index];
-                                    final id = exp['id']?.toString() ?? '';
-                                    final isFavorited = _favoritosLocales.contains(id);
+                  // 🏞️ Lista de Experiencias
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                      child: _filteredExperiences.isEmpty
+                          ? const Center(child: Text('No se encontraron experiencias.'))
+                          : ListView.builder(
+                              itemCount: _filteredExperiences.length,
+                              itemBuilder: (context, index) {
+                                final exp = _filteredExperiences[index];
+                                final id = exp['id']?.toString() ?? index.toString();
+                                final isFavorited = widget.favoritosLocales.contains(id);
+                                String expTitle = exp['name'] ?? exp['titulo'] ?? 'Experiencia';
+                                var price = exp['price'] ?? exp['precio'] ?? 0;
+                                String? imageUrl = exp['image'] ?? exp['imagen'];
 
-                                    // Obtener calificación calculada
-                                    final ratingData = _ratingsMap[id];
-                                    final String ratingText = ratingData != null 
-                                        ? '★ ${ratingData['promedio']} (${ratingData['total']} reseñas)'
-                                        : 'Sin calificación';
-
-                                    String? imageUrl;
-                                    if (exp['imagenes'] != null && (exp['imagenes'] as List).isNotEmpty) {
-                                      imageUrl = exp['imagenes'][0]['url'];
-                                    }
-
-                                    return Container(
-                                      margin: const EdgeInsets.only(bottom: 24),
-                                      child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                return Container(
+                                  margin: const EdgeInsets.only(bottom: 20),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Stack(
                                         children: [
-                                          Stack(
-                                            children: [
-                                              ClipRRect(
-                                                borderRadius: BorderRadius.circular(16),
-                                                child: imageUrl != null
-                                                    ? Image.network(
-                                                        imageUrl,
-                                                        height: 220,
-                                                        width: double.infinity,
-                                                        fit: BoxFit.cover,
-                                                        errorBuilder: (context, error, stackTrace) =>
-                                                            Container(
-                                                              height: 220,
-                                                              color: Colors.grey[200],
-                                                              child: const Icon(Icons.broken_image, size: 50, color: Colors.grey),
-                                                            ),
-                                                      )
-                                                    : Container(
-                                                        height: 220,
-                                                        color: Theme.of(context).colorScheme.primary.withOpacity(0.15),
-                                                        child: Icon(Icons.landscape, size: 60, color: Theme.of(context).colorScheme.primary),
-                                                      ),
-                                              ),
-                                              Positioned(
-                                                top: 12,
-                                                left: 12,
-                                                child: Container(
-                                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                                  decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
-                                                  child: const Text('Populares', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                                                ),
-                                              ),
-                                              Positioned(
-                                                top: 8,
-                                                right: 8,
-                                                child: IconButton(
-                                                  icon: Icon(
-                                                    isFavorited ? Icons.favorite : Icons.favorite_border,
-                                                    color: isFavorited ? Colors.red : Colors.white,
-                                                    size: 28,
+                                          ClipRRect(
+                                            borderRadius: BorderRadius.circular(16),
+                                            child: imageUrl != null && imageUrl.isNotEmpty
+                                                ? Image.network(
+                                                    imageUrl,
+                                                    height: 200,
+                                                    width: double.infinity,
+                                                    fit: BoxFit.cover,
+                                                    errorBuilder: (_, __, ___) => Container(
+                                                      height: 200,
+                                                      color: Colors.grey[200],
+                                                      child: const Icon(Icons.broken_image, size: 50, color: Colors.grey),
+                                                    ),
+                                                  )
+                                                : Container(
+                                                    height: 200,
+                                                    color: Theme.of(context).colorScheme.primary.withOpacity(0.15),
+                                                    child: Icon(Icons.landscape, size: 60, color: Theme.of(context).colorScheme.primary),
                                                   ),
-                                                  onPressed: () {
-                                                    setState(() {
-                                                      isFavorited ? _favoritosLocales.remove(id) : _favoritosLocales.add(id);
-                                                    });
-                                                  },
-                                                ),
-                                              ),
-                                            ],
                                           ),
-                                          const SizedBox(height: 10),
-                                          Row(
-                                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                            crossAxisAlignment: CrossAxisAlignment.start,
-                                            children: [
-                                              Expanded(
-                                                child: Column(
-                                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                                  children: [
-                                                    Text(
-                                                      exp['titulo'] ?? 'Tour',
-                                                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                                                    ),
-                                                    const SizedBox(height: 2),
-                                                    // ⭐ Mostrar estrellas calculadas dinámicamente
-                                                    Text(
-                                                      ratingText,
-                                                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: Colors.black87),
-                                                    ),
-                                                    const SizedBox(height: 2),
-                                                    Text(
-                                                      'Desde \$${exp['precio'] ?? 0} MXN',
-                                                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
-                                                    ),
-                                                  ],
-                                                ),
+                                          Positioned(
+                                            top: 8,
+                                            right: 8,
+                                            child: IconButton(
+                                              icon: Icon(
+                                                isFavorited ? Icons.favorite : Icons.favorite_border,
+                                                color: isFavorited ? Colors.red : Colors.white,
+                                                size: 28,
                                               ),
-                                              // Ambos perfiles ven el botón "Ver" para ir a los detalles completos
-                                              ElevatedButton(
-                                                style: ElevatedButton.styleFrom(
-                                                  backgroundColor: Theme.of(context).colorScheme.primary,
-                                                  foregroundColor: Colors.white,
-                                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                                                ),
-                                                onPressed: () {
-                                                  Navigator.push(
-                                                    context,
-                                                    MaterialPageRoute(
-                                                      builder: (context) => ExperienceDetailScreen(
-                                                        experience: exp,
-                                                        ratingText: ratingText,
-                                                        isGuest: widget.isGuest,
-                                                      ),
-                                                    ),
-                                                  );
-                                                },
-                                                child: const Text('Ver'),
-                                              ),
-                                            ],
+                                              onPressed: () => widget.onFavoriteToggle(id),
+                                            ),
                                           ),
                                         ],
                                       ),
-                                    );
-                                  },
-                                ),
-                        ),
-                      ],
+                                      const SizedBox(height: 8),
+                                      Row(
+                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                        children: [
+                                          Expanded(
+                                            child: Column(
+                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                              children: [
+                                                Text(expTitle, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                                                Text('Desde \$$price MXN', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                                              ],
+                                            ),
+                                          ),
+                                          ElevatedButton(
+                                            style: ElevatedButton.styleFrom(
+                                              backgroundColor: Theme.of(context).colorScheme.primary,
+                                              foregroundColor: Colors.white,
+                                            ),
+                                            onPressed: () {
+                                              Navigator.push(
+                                                context,
+                                                MaterialPageRoute(
+                                                  builder: (context) => ExperienceDetailScreen(experience: exp, isLoggedIn: widget.isLoggedIn),
+                                                ),
+                                              );
+                                            },
+                                            child: const Text('Ver'),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              },
+                            ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
+      ),
+    );
+  }
+}
+
+// -----------------------------------------------------------------
+// PESTAÑA 2: FAVORITOS
+// -----------------------------------------------------------------
+class FavoritesTab extends StatelessWidget {
+  final String baseUrl;
+  final List<String> favoritosLocales;
+
+  const FavoritesTab({super.key, required this.baseUrl, required this.favoritosLocales});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Tus Favoritos'), backgroundColor: Theme.of(context).colorScheme.primary, foregroundColor: Colors.white),
+      body: favoritosLocales.isEmpty
+          ? Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: const [
+                  Icon(Icons.favorite_border, size: 80, color: Colors.grey),
+                  SizedBox(height: 16),
+                  Text('Aún no has guardado experiencias favoritas.', style: TextStyle(fontSize: 16, color: Colors.grey)),
+                ],
+              ),
+            )
+          : ListView.builder(
+              padding: const EdgeInsets.all(16),
+              itemCount: favoritosLocales.length,
+              itemBuilder: (context, index) {
+                return Card(
+                  child: ListTile(
+                    leading: const Icon(Icons.star, color: Colors.amber),
+                    title: Text('Experiencia Favorita #${favoritosLocales[index]}'),
+                    subtitle: const Text('Guardado en tu dispositivo'),
+                  ),
+                );
+              },
             ),
     );
   }
 }
 
 // -----------------------------------------------------------------
-// NUEVA PANTALLA DE DETALLE COMPLETO (ESTILO AIRBNB DETALLES)
+// PESTAÑA 3: RESERVACIONES
 // -----------------------------------------------------------------
-class ExperienceDetailScreen extends StatelessWidget {
-  final dynamic experience;
-  final String ratingText;
-  final bool isGuest;
+class ReservationsTab extends StatelessWidget {
+  final bool isLoggedIn;
+  final VoidCallback onGoToLogin;
 
-  const ExperienceDetailScreen({
-    super.key,
-    required this.experience,
-    required this.ratingText,
-    required this.isGuest,
-  });
+  const ReservationsTab({super.key, required this.isLoggedIn, required this.onGoToLogin});
 
   @override
   Widget build(BuildContext context) {
-    // Agrupar lista completa de imágenes si las hay
-    List<dynamic> imagenes = experience['imagenes'] ?? [];
-    String? mainImageUrl = imagenes.isNotEmpty ? imagenes[0]['url'] : null;
+    return Scaffold(
+      appBar: AppBar(title: const Text('Tus Reservaciones'), backgroundColor: Theme.of(context).colorScheme.primary, foregroundColor: Colors.white),
+      body: !isLoggedIn
+          ? Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24.0),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(Icons.confirmation_number_outlined, size: 80, color: Colors.grey),
+                    const SizedBox(height: 16),
+                    const Text('Inicia sesión para consultar tus reservaciones.', textAlign: TextAlign.center, style: TextStyle(fontSize: 16)),
+                    const SizedBox(height: 20),
+                    ElevatedButton(
+                      onPressed: onGoToLogin,
+                      style: ElevatedButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.primary, foregroundColor: Colors.white),
+                      child: const Text('Iniciar Sesión'),
+                    )
+                  ],
+                ),
+              ),
+            )
+          : const Center(child: Text('No tienes reservaciones activas por el momento.')),
+    );
+  }
+}
+
+// -----------------------------------------------------------------
+// PESTAÑA 4: MENSAJES
+// -----------------------------------------------------------------
+class MessagesTab extends StatelessWidget {
+  final bool isLoggedIn;
+  final VoidCallback onGoToLogin;
+
+  const MessagesTab({super.key, required this.isLoggedIn, required this.onGoToLogin});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Mensajes con Prestadores'), backgroundColor: Theme.of(context).colorScheme.primary, foregroundColor: Colors.white),
+      body: !isLoggedIn
+          ? Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24.0),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(Icons.chat_bubble_outline, size: 80, color: Colors.grey),
+                    const SizedBox(height: 16),
+                    const Text('Inicia sesión para conversar con los guías y prestadores.', textAlign: TextAlign.center, style: TextStyle(fontSize: 16)),
+                    const SizedBox(height: 20),
+                    ElevatedButton(
+                      onPressed: onGoToLogin,
+                      style: ElevatedButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.primary, foregroundColor: Colors.white),
+                      child: const Text('Iniciar Sesión'),
+                    )
+                  ],
+                ),
+              ),
+            )
+          : const Center(child: Text('No tienes conversaciones iniciadas.')),
+    );
+  }
+}
+
+// -----------------------------------------------------------------
+// PESTAÑA 5: PERFIL (USUARIO CONECTADO)
+// -----------------------------------------------------------------
+class ProfileTab extends StatelessWidget {
+  final VoidCallback onLogout;
+
+  const ProfileTab({super.key, required this.onLogout});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Mi Perfil'), backgroundColor: Theme.of(context).colorScheme.primary, foregroundColor: Colors.white),
+      body: Padding(
+        padding: const EdgeInsets.all(24.0),
+        child: Column(
+          children: [
+            const CircleAvatar(radius: 50, child: Icon(Icons.person, size: 60)),
+            const SizedBox(height: 16),
+            const Text('Turista Vivra', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            const Text('Sesión Activa', style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold)),
+            const Spacer(),
+            ElevatedButton.icon(
+              onPressed: onLogout,
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFC76A28), foregroundColor: Colors.white, minimumSize: const Size.fromHeight(50)),
+              icon: const Icon(Icons.logout),
+              label: const Text('Cerrar Sesión', style: TextStyle(fontSize: 16)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// -----------------------------------------------------------------
+// PESTAÑA 5 (ALTERNATIVA): FORMULARIO DE INICIO DE SESIÓN
+// -----------------------------------------------------------------
+class LoginTab extends StatefulWidget {
+  final String baseUrl;
+  final Function(String) onLoginSuccess;
+
+  const LoginTab({super.key, required this.baseUrl, required this.onLoginSuccess});
+
+  @override
+  State<LoginTab> createState() => _LoginTabState();
+}
+
+class _LoginTabState extends State<LoginTab> {
+  final _emailController = TextEditingController();
+  final _passwordController = TextEditingController();
+  final _dio = Dio();
+  bool _isLoading = false;
+
+  Future<void> _login() async {
+    if (_emailController.text.isEmpty || _passwordController.text.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Llena todos los campos')));
+      return;
+    }
+
+    setState(() => _isLoading = true);
+
+    try {
+      final response = await _dio.post(
+        '${widget.baseUrl}/login',
+        data: {'email': _emailController.text.trim(), 'password': _passwordController.text},
+      );
+
+      if (response.statusCode == 200) {
+        String token = response.data['token'] ?? 'token_valido';
+        widget.onLoginSuccess(token);
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Credenciales incorrectas'), backgroundColor: Colors.red));
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Iniciar Sesión'), backgroundColor: Theme.of(context).colorScheme.primary, foregroundColor: Colors.white),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(24.0),
+        child: Column(
+          children: [
+            const Icon(Icons.local_activity, size: 70, color: Color(0xFFC76A28)),
+            const SizedBox(height: 16),
+            const Text('Accede a tu cuenta de Vivra', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 24),
+            TextField(controller: _emailController, decoration: const InputDecoration(labelText: 'Correo', border: OutlineInputBorder())),
+            const SizedBox(height: 16),
+            TextField(controller: _passwordController, obscureText: true, decoration: const InputDecoration(labelText: 'Contraseña', border: OutlineInputBorder())),
+            const SizedBox(height: 24),
+            _isLoading
+                ? const CircularProgressIndicator()
+                : ElevatedButton(
+                    onPressed: _login,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Theme.of(context).colorScheme.primary,
+                      foregroundColor: Colors.white,
+                      minimumSize: const Size.fromHeight(50),
+                    ),
+                    child: const Text('Ingresar'),
+                  ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// -----------------------------------------------------------------
+// PANTALLA DE DETALLE
+// -----------------------------------------------------------------
+class ExperienceDetailScreen extends StatelessWidget {
+  final dynamic experience;
+  final bool isLoggedIn;
+
+  const ExperienceDetailScreen({super.key, required this.experience, required this.isLoggedIn});
+
+  @override
+  Widget build(BuildContext context) {
+    String title = experience['name'] ?? experience['titulo'] ?? 'Experiencia';
+    var price = experience['price'] ?? experience['precio'] ?? 0;
+    String desc = experience['description'] ?? experience['descripcion'] ?? 'Sin descripción';
 
     return Scaffold(
-      body: Column(
-        children: [
-          Expanded(
-            child: SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // 🖼️ Header superior con la Imagen Grande y botones flotantes
-                  Stack(
-                    children: [
-                      mainImageUrl != null
-                          ? Image.network(
-                              mainImageUrl,
-                              height: 320,
-                              width: double.infinity,
-                              fit: BoxFit.cover,
-                            )
-                          : Container(
-                              height: 320,
-                              color: Theme.of(context).colorScheme.primary.withOpacity(0.15),
-                              child: Icon(Icons.landscape, size: 80, color: Theme.of(context).colorScheme.primary),
-                            ),
-                      // Flecha de regreso superior
-                      Positioned(
-                        top: 40,
-                        left: 16,
-                        child: CircleAvatar(
-                          backgroundColor: Colors.white.withOpacity(0.9),
-                          child: IconButton(
-                            icon: const Icon(Icons.arrow_back, color: Colors.black87),
-                            onPressed: () => Navigator.pop(context),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-
-                  // Contenido de la información técnica del tour
-                  Padding(
-                    padding: const EdgeInsets.all(24.0),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // Título de la experiencia
-                        Text(
-                          experience['titulo'] ?? 'Tour Auténtico',
-                          style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.black87),
-                        ),
-                        const SizedBox(height: 8),
-                        
-                        // Calificación e información de zona
-                        Row(
-                          children: [
-                            const Icon(Icons.star, size: 18, color: Colors.amber),
-                            const SizedBox(width: 4),
-                            Text(
-                              ratingText,
-                              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
-                            ),
-                            const SizedBox(width: 12),
-                            Text(
-                              '•  ${experience['categoria'] ?? 'Oaxaca'}',
-                              style: const TextStyle(fontSize: 15, color: Colors.grey, fontWeight: FontWeight.w500),
-                            ),
-                          ],
-                        ),
-                        const Padding(
-                          padding: EdgeInsets.symmetric(vertical: 16.0),
-                          child: Divider(color: Colors.black12),
-                        ),
-
-                        // Descripción extendida del tour
-                        const Text(
-                          'Acerca de esta experiencia',
-                          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          experience['descripcion'] ?? 'No hay una descripción detallada disponible en este momento.',
-                          style: const TextStyle(fontSize: 15, color: Colors.black87, height: 1.5),
-                        ),
-                        const SizedBox(height: 16),
-                        
-                        // Ubicación si existe
-                        if (experience['ubicacion'] != null) ...[
-                          Row(
-                            children: [
-                              const Icon(Icons.location_on, color: Colors.grey),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  experience['ubicacion'],
-                                  style: const TextStyle(fontSize: 14, color: Colors.black54, fontWeight: FontWeight.w500),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                ],
+      appBar: AppBar(title: Text(title), backgroundColor: Theme.of(context).colorScheme.primary, foregroundColor: Colors.white),
+      body: Padding(
+        padding: const EdgeInsets.all(24.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(title, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            Text('Precio: \$$price MXN', style: const TextStyle(fontSize: 18, color: Colors.green, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 16),
+            Text(desc, style: const TextStyle(fontSize: 15)),
+            const Spacer(),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFC76A28),
+                foregroundColor: Colors.white,
+                minimumSize: const Size.fromHeight(50),
               ),
+              onPressed: () {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text(isLoggedIn ? '¡Reservando $title!' : 'Debes iniciar sesión para comprar.')),
+                );
+              },
+              child: Text(isLoggedIn ? 'Comprar' : 'Iniciar Sesión para Reservar'),
             ),
-          ),
-
-          // 💳 BARRA FLOTANTE INFERIOR DE COMPRA ESTILO AIRBNB
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              border: const Border(top: BorderSide(color: Colors.black12, width: 0.5)),
-              boxShadow: [
-                BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 10, offset: const Offset(0, -4)),
-              ],
-            ),
-            child: SafeArea(
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  // Columna de precios en Pesos Mexicanos
-                  Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        '\$${experience['precio'] ?? 0} MXN',
-                        style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.black87),
-                      ),
-                      const Text(
-                        'por participante',
-                        style: TextStyle(fontSize: 12, color: Colors.black54),
-                      ),
-                    ],
-                  ),
-                  
-                  // Botón Dinámico de Acción final
-                  ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color.fromARGB(255, 204, 123, 11), // Rojo clásico Airbnb para destacar
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 14),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    ),
-                    onPressed: () {
-                      if (isGuest) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Debes iniciar sesión con tu cuenta de Turista para comprar.'),
-                            backgroundColor: Colors.amber,
-                          ),
-                        );
-                      } else {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text('¡Reservando tu lugar para: ${experience['titulo']}!'),
-                            backgroundColor: Colors.green,
-                          ),
-                        );
-                      }
-                    },
-                    child: Text(
-                      isGuest ? 'Iniciar Sesión' : 'Comprar',
-                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
