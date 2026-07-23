@@ -733,6 +733,7 @@ class _LoginTabState extends State<LoginTab> {
   final _passwordController = TextEditingController();
   final _dio = Dio();
   bool _isLoading = false;
+  bool _obscurePassword = true; // 👁️ Nueva variable para controlar el ojito
 
   Future<void> _login() async {
     if (_emailController.text.isEmpty || _passwordController.text.isEmpty) {
@@ -749,7 +750,7 @@ class _LoginTabState extends State<LoginTab> {
       );
 
       if (response.statusCode == 200) {
-        // Buscamos 'token' o 'access_token' para asegurar que agarramos el pase VIP real
+        // Buscamos 'token' o 'access_token'
         String token = response.data['token'] ?? response.data['access_token'] ?? '';
         
         if (token.isNotEmpty) {
@@ -779,9 +780,34 @@ class _LoginTabState extends State<LoginTab> {
             const SizedBox(height: 16),
             const Text('Accede a tu cuenta de Vivra', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             const SizedBox(height: 24),
-            TextField(controller: _emailController, decoration: const InputDecoration(labelText: 'Correo', border: OutlineInputBorder())),
+            TextField(
+              controller: _emailController, 
+              decoration: const InputDecoration(labelText: 'Correo', border: OutlineInputBorder())
+            ),
             const SizedBox(height: 16),
-            TextField(controller: _passwordController, obscureText: true, decoration: const InputDecoration(labelText: 'Contraseña', border: OutlineInputBorder())),
+            
+            // 👁️ Campo de contraseña actualizado con el ojito
+            TextField(
+              controller: _passwordController, 
+              obscureText: _obscurePassword, 
+              decoration: InputDecoration(
+                labelText: 'Contraseña', 
+                border: const OutlineInputBorder(),
+                suffixIcon: IconButton(
+                  icon: Icon(
+                    _obscurePassword ? Icons.visibility_off : Icons.visibility,
+                    color: Colors.grey,
+                  ),
+                  onPressed: () {
+                    // Cambiamos el estado al presionar el botón
+                    setState(() {
+                      _obscurePassword = !_obscurePassword;
+                    });
+                  },
+                ),
+              )
+            ),
+            
             const SizedBox(height: 24),
             _isLoading
                 ? const CircularProgressIndicator()
@@ -852,15 +878,18 @@ class _ExperienceDetailScreenState extends State<ExperienceDetailScreen> {
     }
   }
 
-  // Calculadora de precio dinámico (igual a la de Laravel)
-  int _calculateTotalPrice() {
-    int basePrice = int.tryParse(widget.experience['price']?.toString() ?? '0') ?? 0;
-    int included = int.tryParse(widget.experience['included_persons']?.toString() ?? '1') ?? 1;
-    int extraPrice = int.tryParse(widget.experience['extra_person_price']?.toString() ?? '0') ?? 0;
-    
-    int extraPersons = (_quantity - included > 0) ? (_quantity - included) : 0;
-    return basePrice + (extraPersons * extraPrice);
-  }
+  // Calculadora de precio dinámico (Corregida)
+    int _calculateTotalPrice() {
+      // Ahora busca tanto 'price' como 'precio'
+      String priceStr = widget.experience['price']?.toString() ?? widget.experience['precio']?.toString() ?? '0';
+      int basePrice = int.tryParse(priceStr) ?? 0;
+      
+      int included = int.tryParse(widget.experience['included_persons']?.toString() ?? '1') ?? 1;
+      int extraPrice = int.tryParse(widget.experience['extra_person_price']?.toString() ?? '0') ?? 0;
+      
+      int extraPersons = (_quantity - included > 0) ? (_quantity - included) : 0;
+      return basePrice + (extraPersons * extraPrice);
+    }
 
   @override
   Widget build(BuildContext context) {
