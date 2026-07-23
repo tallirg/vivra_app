@@ -2,24 +2,29 @@ import 'package:dio/dio.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 class ApiService {
-  final Dio _dio = Dio(BaseOptions(
-    baseUrl: 'http://192.168.1.78:8000/api',
-    headers: {'Accept': 'application/json'},
+  final Dio client = Dio(BaseOptions(
+    // OJO: Es vital que termine con la diagonal al final (/api/)
+    baseUrl: 'https://vivra-915z.onrender.com/api/', 
+    headers: {
+      'Accept': 'application/json', // Esto evita el 404 engañoso de Laravel
+      'Content-Type': 'application/json',
+    },
   ));
-  final _storage = const FlutterSecureStorage();
+  
+  final storage = const FlutterSecureStorage();
 
-  // Constructor que añade un Interceptor para manejar el Token automáticamente
   ApiService() {
-    _dio.interceptors.add(InterceptorsWrapper(
-      onRequest: (options, handler) async {
-        String? token = await _storage.read(key: 'auth_token');
-        if (token != null) {
-          options.headers['Authorization'] = 'Bearer $token';
-        }
-        return handler.next(options);
-      },
-    ));
+    client.interceptors.add(
+      InterceptorsWrapper(
+        onRequest: (options, handler) async {
+          // Extraemos el token del login y lo adjuntamos como pase VIP
+          String? token = await storage.read(key: 'auth_token');
+          if (token != null && token.isNotEmpty) {
+            options.headers['Authorization'] = 'Bearer $token';
+          }
+          return handler.next(options);
+        },
+      ),
+    );
   }
-
-  Dio get client => _dio;
 }

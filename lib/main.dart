@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'services/tourist_service.dart';
 
 void main() {
   runApp(const MyApp());
@@ -497,37 +498,148 @@ class FavoritesTab extends StatelessWidget {
 // -----------------------------------------------------------------
 // PESTAÑA 3: RESERVACIONES
 // -----------------------------------------------------------------
-class ReservationsTab extends StatelessWidget {
+class ReservationsTab extends StatefulWidget {
   final bool isLoggedIn;
   final VoidCallback onGoToLogin;
 
-  const ReservationsTab({super.key, required this.isLoggedIn, required this.onGoToLogin});
+  const ReservationsTab({
+    super.key,
+    required this.isLoggedIn,
+    required this.onGoToLogin,
+  });
+
+  @override
+  State<ReservationsTab> createState() => _ReservationsTabState();
+}
+
+class _ReservationsTabState extends State<ReservationsTab> {
+  bool _loading = false;
+  List<dynamic> _bookings = [];
+
+  // 1. ESTO ES VITAL: Es lo primero que se ejecuta al cargar la pestaña
+  @override
+  void initState() {
+    super.initState();
+
+    // Si el usuario está logueado, ve por los datos inmediatamente
+    if (widget.isLoggedIn) {
+      _loadBookings();
+    }
+  }
+
+  @override
+void didUpdateWidget(covariant ReservationsTab oldWidget) {
+  super.didUpdateWidget(oldWidget);
+  // Si antes no estaba logueado y ahora sí, o si está logueado pero aún no tenemos datos
+  if (widget.isLoggedIn && (!oldWidget.isLoggedIn || _bookings.isEmpty)) {
+    _loadBookings();
+  }
+}
+
+  // 2. LA FUNCIÓN QUE CONECTA CON EL SERVICIO
+Future<void> _loadBookings() async {
+  print('🚀 _loadBookings() EJECUTÁNDOSE');
+
+  setState(() {
+    _loading = true;
+  });
+
+  final reservas = await TouristService().getMyBookings();
+
+  print('🚀 Reservas recibidas: ${reservas.length}');
+  print(reservas);
+
+  setState(() {
+    _bookings = reservas;
+    _loading = false;
+  });
+}
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Tus Reservaciones'), backgroundColor: Theme.of(context).colorScheme.primary, foregroundColor: Colors.white),
-      body: !isLoggedIn
+      appBar: AppBar(
+        title: const Text('Tus Reservaciones'),
+        backgroundColor: Theme.of(context).colorScheme.primary,
+        foregroundColor: Colors.white,
+      ),
+      body: !widget.isLoggedIn
           ? Center(
               child: Padding(
                 padding: const EdgeInsets.all(24.0),
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    const Icon(Icons.confirmation_number_outlined, size: 80, color: Colors.grey),
+                    const Icon(
+                      Icons.confirmation_number_outlined,
+                      size: 80,
+                      color: Colors.grey,
+                    ),
                     const SizedBox(height: 16),
-                    const Text('Inicia sesión para consultar tus reservaciones.', textAlign: TextAlign.center, style: TextStyle(fontSize: 16)),
+                    const Text(
+                      'Inicia sesión para consultar tus reservaciones.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 16),
+                    ),
                     const SizedBox(height: 20),
                     ElevatedButton(
-                      onPressed: onGoToLogin,
-                      style: ElevatedButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.primary, foregroundColor: Colors.white),
+                      onPressed: widget.onGoToLogin,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor:
+                            Theme.of(context).colorScheme.primary,
+                        foregroundColor: Colors.white,
+                      ),
                       child: const Text('Iniciar Sesión'),
-                    )
+                    ),
                   ],
                 ),
               ),
             )
-          : const Center(child: Text('No tienes reservaciones activas por el momento.')),
+          : _loading
+              ? const Center(
+                  child: CircularProgressIndicator(),
+                )
+              : _bookings.isEmpty
+                  ? const Center(
+                      child: Text(
+                        'No tienes reservaciones activas por el momento.',
+                      ),
+                    )
+                  : ListView.builder(
+                      itemCount: _bookings.length,
+                      itemBuilder: (context, index) {
+                        final reserva = _bookings[index];
+
+                        return Card(
+                          margin: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 8,
+                          ),
+                          child: ListTile(
+                            leading: const Icon(Icons.event_available),
+                            title: Text(
+                              reserva['experience']?['title'] ??
+                                  'Experiencia',
+                            ),
+                            subtitle: Column(
+                              crossAxisAlignment:
+                                  CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Fecha: ${reserva['booking_date'] ?? 'N/A'}',
+                                ),
+                                Text(
+                                  'Lugares: ${reserva['slots'] ?? 'N/A'}',
+                                ),
+                                Text(
+                                  'Estado: ${reserva['status'] ?? 'N/A'}',
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    ),
     );
   }
 }
@@ -639,8 +751,16 @@ class _LoginTabState extends State<LoginTab> {
       );
 
       if (response.statusCode == 200) {
-        String token = response.data['token'] ?? 'token_valido';
-        widget.onLoginSuccess(token);
+        // Buscamos 'token' o 'access_token' para asegurar que agarramos el pase VIP real
+        String token = response.data['token'] ?? response.data['access_token'] ?? '';
+        
+        if (token.isNotEmpty) {
+          widget.onLoginSuccess(token);
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Error: El servidor no envió el token'), backgroundColor: Colors.red)
+          );
+        }
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Credenciales incorrectas'), backgroundColor: Colors.red));
@@ -683,6 +803,7 @@ class _LoginTabState extends State<LoginTab> {
   }
 }
 
+
 // -----------------------------------------------------------------
 // PANTALLA DE DETALLE
 // -----------------------------------------------------------------
@@ -699,7 +820,11 @@ class ExperienceDetailScreen extends StatelessWidget {
     String desc = experience['description'] ?? experience['descripcion'] ?? 'Sin descripción';
 
     return Scaffold(
-      appBar: AppBar(title: Text(title), backgroundColor: Theme.of(context).colorScheme.primary, foregroundColor: Colors.white),
+      appBar: AppBar(
+        title: Text(title), 
+        backgroundColor: Theme.of(context).colorScheme.primary, 
+        foregroundColor: Colors.white
+      ),
       body: Padding(
         padding: const EdgeInsets.all(24.0),
         child: Column(
@@ -711,6 +836,8 @@ class ExperienceDetailScreen extends StatelessWidget {
             const SizedBox(height: 16),
             Text(desc, style: const TextStyle(fontSize: 15)),
             const Spacer(),
+            
+            // Botón de compra actualizado
             ElevatedButton(
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFFC76A28),
@@ -718,12 +845,180 @@ class ExperienceDetailScreen extends StatelessWidget {
                 minimumSize: const Size.fromHeight(50),
               ),
               onPressed: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text(isLoggedIn ? '¡Reservando $title!' : 'Debes iniciar sesión para comprar.')),
-                );
+                if (isLoggedIn) {
+                  // Redirigir a la pantalla de pago
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => PaymentScreen(
+                        experience: experience,
+                        isLoggedIn: isLoggedIn,
+                      ),
+                    ),
+                  );
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Debes iniciar sesión para comprar.')),
+                  );
+                }
               },
-              child: Text(isLoggedIn ? 'Comprar' : 'Iniciar Sesión para Reservar'),
+              child: Text(isLoggedIn ? 'Comprar ahora' : 'Iniciar Sesión para Reservar'),
             ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// -----------------------------------------------------------------
+// PANTALLA DE PAGO 
+// -----------------------------------------------------------------
+class PaymentScreen extends StatefulWidget {
+  final dynamic experience;
+  final bool isLoggedIn;
+
+  const PaymentScreen({super.key, required this.experience, required this.isLoggedIn});
+
+  @override
+  State<PaymentScreen> createState() => _PaymentScreenState();
+}
+
+class _PaymentScreenState extends State<PaymentScreen> {
+  String _paymentMethod = 'tarjeta'; // 'tarjeta' o 'efectivo'
+  bool _isProcessing = false;
+
+  void _processPayment() async {
+    setState(() => _isProcessing = true);
+
+    // Simulamos un pequeño tiempo de validación del banco o sistema
+    await Future.delayed(const Duration(seconds: 2));
+
+    final service = TouristService();
+    int expId = int.tryParse(widget.experience['id'].toString()) ?? 0;
+    
+    // Aquí es donde realmente llamamos al backend
+    bool success = await service.buyExperience(expId, "Fecha Pendiente", 1);
+
+    setState(() => _isProcessing = false);
+
+    if (success) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('¡Pago exitoso y reserva confirmada! 🎉'), backgroundColor: Colors.green),
+        );
+        // Cerramos la ventana de pago y la de detalle, regresando al menú principal
+        Navigator.of(context).popUntil((route) => route.isFirst);
+      }
+    } else {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Hubo un error al procesar tu pago.'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    String title = widget.experience['name'] ?? widget.experience['titulo'] ?? 'Experiencia';
+    var price = widget.experience['price'] ?? widget.experience['precio'] ?? 0;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Completar Pago'),
+        backgroundColor: Theme.of(context).colorScheme.primary,
+        foregroundColor: Colors.white,
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(24.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Resumen de la compra
+            Text('Resumen de compra', style: TextStyle(fontSize: 18, color: Theme.of(context).colorScheme.primary, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            Card(
+              elevation: 2,
+              child: ListTile(
+                title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
+                trailing: Text('\$$price MXN', style: const TextStyle(fontSize: 16, color: Colors.green, fontWeight: FontWeight.bold)),
+              ),
+            ),
+            const SizedBox(height: 24),
+
+            // Selector de Método de Pago
+            Text('Método de pago', style: TextStyle(fontSize: 18, color: Theme.of(context).colorScheme.primary, fontWeight: FontWeight.bold)),
+            Row(
+              children: [
+                Expanded(
+                  child: RadioListTile<String>(
+                    title: const Text('Tarjeta'),
+                    value: 'tarjeta',
+                    groupValue: _paymentMethod,
+                    activeColor: Theme.of(context).colorScheme.primary,
+                    onChanged: (value) => setState(() => _paymentMethod = value!),
+                  ),
+                ),
+                Expanded(
+                  child: RadioListTile<String>(
+                    title: const Text('Efectivo'),
+                    value: 'efectivo',
+                    groupValue: _paymentMethod,
+                    activeColor: Theme.of(context).colorScheme.primary,
+                    onChanged: (value) => setState(() => _paymentMethod = value!),
+                  ),
+                ),
+              ],
+            ),
+            const Divider(),
+            const SizedBox(height: 16),
+
+            // Opciones dinámicas según el método elegido
+            if (_paymentMethod == 'tarjeta') ...[
+              const TextField(
+                decoration: InputDecoration(labelText: 'Número de Tarjeta', border: OutlineInputBorder(), prefixIcon: Icon(Icons.credit_card)),
+                keyboardType: TextInputType.number,
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: const [
+                  Expanded(child: TextField(decoration: InputDecoration(labelText: 'Vencimiento (MM/AA)', border: OutlineInputBorder()))),
+                  SizedBox(width: 16),
+                  Expanded(child: TextField(decoration: InputDecoration(labelText: 'CVV', border: OutlineInputBorder()), obscureText: true)),
+                ],
+              ),
+              const SizedBox(height: 16),
+              const TextField(decoration: InputDecoration(labelText: 'Nombre del Titular', border: OutlineInputBorder())),
+            ] else ...[
+              Center(
+                child: Column(
+                  children: [
+                    const Text('Presenta este código en cualquier tienda afiliada (OXXO, 7-Eleven) para pagar tu reserva.', textAlign: TextAlign.center),
+                    const SizedBox(height: 20),
+                    // Simulamos un código de barras con un ícono grande
+                    const Icon(Icons.qr_code_2, size: 150),
+                    const SizedBox(height: 8),
+                    const Text('9876 5432 1098 7654', style: TextStyle(fontSize: 18, letterSpacing: 2, fontWeight: FontWeight.bold)),
+                  ],
+                ),
+              ),
+            ],
+
+            const SizedBox(height: 32),
+            
+            // Botón de Pagar
+            _isProcessing
+                ? const Center(child: CircularProgressIndicator())
+                : ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.green,
+                      foregroundColor: Colors.white,
+                      minimumSize: const Size.fromHeight(55),
+                    ),
+                    onPressed: _processPayment,
+                    child: Text(_paymentMethod == 'tarjeta' ? 'Pagar \$$price MXN' : 'Confirmar y Generar Orden', style: const TextStyle(fontSize: 18)),
+                  ),
           ],
         ),
       ),
