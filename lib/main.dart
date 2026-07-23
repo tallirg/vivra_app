@@ -106,6 +106,7 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
       ReservationsTab(
         isLoggedIn: _isLoggedIn,
         onGoToLogin: () => setState(() => _currentIndex = 4),
+        baseUrl: _baseUrl, // 👈 Faltaba esta línea
       ),
       // 4. Mensajes
       MessagesTab(
@@ -498,14 +499,20 @@ class FavoritesTab extends StatelessWidget {
 // -----------------------------------------------------------------
 // PESTAÑA 3: RESERVACIONES
 // -----------------------------------------------------------------
+
+// -----------------------------------------------------------------
+// PESTAÑA 3: RESERVACIONES (CONECTADA A LA API)
+// -----------------------------------------------------------------
 class ReservationsTab extends StatefulWidget {
   final bool isLoggedIn;
   final VoidCallback onGoToLogin;
+  final String baseUrl;
 
   const ReservationsTab({
     super.key,
     required this.isLoggedIn,
     required this.onGoToLogin,
+    required this.baseUrl,
   });
 
   @override
@@ -513,131 +520,119 @@ class ReservationsTab extends StatefulWidget {
 }
 
 class _ReservationsTabState extends State<ReservationsTab> {
-  bool _loading = false;
-  List<dynamic> _bookings = [];
+  final Dio _dio = Dio();
+  final _storage = const FlutterSecureStorage();
+  List<dynamic> _reservas = [];
+  bool _loading = true;
 
-  // 1. ESTO ES VITAL: Es lo primero que se ejecuta al cargar la pestaña
   @override
   void initState() {
     super.initState();
-
-    // Si el usuario está logueado, ve por los datos inmediatamente
     if (widget.isLoggedIn) {
-      _loadBookings();
+      _fetchReservas();
     }
   }
 
   @override
   void didUpdateWidget(covariant ReservationsTab oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // Si antes no estaba logueado y ahora sí, o si está logueado pero aún no tenemos datos
-    if (widget.isLoggedIn && (!oldWidget.isLoggedIn || _bookings.isEmpty)) {
-      _loadBookings();
+    if (widget.isLoggedIn && (!oldWidget.isLoggedIn || _reservas.isEmpty)) {
+      setState(() => _loading = true);
+      _fetchReservas();
     }
   }
 
-  // 2. LA FUNCIÓN QUE CONECTA CON EL SERVICIO
-  Future<void> _loadBookings() async {
-    print('🚀 _loadBookings() EJECUTÁNDOSE');
+  // 2. Corregimos la petición con timeout y bloque finally para asegurar que siempre Quite el cargador
+  // Ubicación: lib/main.dart -> dentro de _ReservationsTabState
+Future<void> _fetchReservas() async {
+  try {
+    final list = await TouristService().getMyBookings();
 
-    setState(() {
-      _loading = true;
-    });
-
-    final reservas = await TouristService().getMyBookings();
-
-    print('🚀 Reservas recibidas: ${reservas.length}');
-    print(reservas);
-
-    setState(() {
-      _bookings = reservas;
-      _loading = false;
-    });
+    if (mounted) {
+      setState(() {
+        _reservas = list;
+      });
+    }
+  } catch (e) {
+    debugPrint('Error obteniendo reservas: $e');
+  } finally {
+    if (mounted) {
+      setState(() => _loading = false);
+    }
   }
+}
 
   @override
   Widget build(BuildContext context) {
+    if (!widget.isLoggedIn) {
+      return Scaffold(
+        appBar: AppBar(
+          title: const Text('Tus Reservaciones'),
+          backgroundColor: Theme.of(context).colorScheme.primary,
+          foregroundColor: Colors.white,
+        ),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24.0),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.confirmation_number_outlined, size: 80, color: Colors.grey),
+                const SizedBox(height: 16),
+                const Text(
+                  'Inicia sesión para consultar tus reservaciones.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 16),
+                ),
+                const SizedBox(height: 20),
+                ElevatedButton(
+                  onPressed: widget.onGoToLogin,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Theme.of(context).colorScheme.primary,
+                    foregroundColor: Colors.white,
+                  ),
+                  child: const Text('Iniciar Sesión'),
+                )
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Tus Reservaciones'),
         backgroundColor: Theme.of(context).colorScheme.primary,
         foregroundColor: Colors.white,
       ),
-      body: !widget.isLoggedIn
-          ? Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24.0),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(
-                      Icons.confirmation_number_outlined,
-                      size: 80,
-                      color: Colors.grey,
-                    ),
-                    const SizedBox(height: 16),
-                    const Text(
-                      'Inicia sesión para consultar tus reservaciones.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(fontSize: 16),
-                    ),
-                    const SizedBox(height: 20),
-                    ElevatedButton(
-                      onPressed: widget.onGoToLogin,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor:
-                            Theme.of(context).colorScheme.primary,
-                        foregroundColor: Colors.white,
-                      ),
-                      child: const Text('Iniciar Sesión'),
-                    ),
-                  ],
-                ),
-              ),
-            )
-          : _loading
-              ? const Center(
-                  child: CircularProgressIndicator(),
-                )
-              : _bookings.isEmpty
-                  ? const Center(
-                      child: Text(
-                        'No tienes reservaciones activas por el momento.',
-                      ),
-                    )
-                  : ListView.builder(
-                      itemCount: _bookings.length,
-                      itemBuilder: (context, index) {
-                        final reserva = _bookings[index];
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : _reservas.isEmpty
+              ? const Center(child: Text('No tienes reservaciones activas.'))
+              : RefreshIndicator(
+                  onRefresh: _fetchReservas,
+                  child: ListView.builder(
+                    padding: const EdgeInsets.all(16),
+                    itemCount: _reservas.length,
+                    itemBuilder: (context, index) {
+                      final item = _reservas[index];
+                      String expName = item['experience']?['name'] ?? item['nombre'] ?? 'Reserva #${item['id']}';
+                      String fecha = item['booking_date'] ?? 'Sin fecha';
+                      var total = item['total_price'] ?? 0;
 
-                        return Card(
-                          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                          child: ListTile(
-                            leading: const Icon(Icons.event_available, color: Colors.green, size: 30),
-                            title: Text(
-                              reserva['experience']?['name'] ?? reserva['experience']?['titulo'] ?? 'Experiencia',
-                              style: const TextStyle(fontWeight: FontWeight.bold),
-                            ),
-                            subtitle: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const SizedBox(height: 4),
-                                Text('Fecha: ${reserva['booking_date'] ?? 'Pendiente'}'),
-                                // Protegemos la lectura del horario por si es una reserva vieja de prueba
-                                Text('Hora: ${reserva['schedule'] != null ? reserva['schedule']['start_time'].toString().substring(0, 5) : 'N/A'}'),
-                                Text('Lugares: ${reserva['quantity'] ?? 1}'),
-                                const SizedBox(height: 4),
-                                Text(
-                                  'Estado: ${reserva['status'] == 'confirmed' ? 'Confirmada' : reserva['status']}',
-                                  style: TextStyle(color: Theme.of(context).colorScheme.primary, fontWeight: FontWeight.bold),
-                                ),
-                              ],
-                            ),
-                            isThreeLine: true,
-                          ),
-                        );
-                      },
-                    ),
+                      return Card(
+                        margin: const EdgeInsets.only(bottom: 12),
+                        child: ListTile(
+                          leading: Icon(Icons.confirmation_number, color: Theme.of(context).colorScheme.primary),
+                          title: Text(expName, style: const TextStyle(fontWeight: FontWeight.bold)),
+                          subtitle: Text('Fecha: $fecha - Hora: $hora'),
+                          trailing: Text('\$$total MXN', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.green)),
+                        ),
+                      );
+                    },
+                  ),
+                ),
     );
   }
 }
