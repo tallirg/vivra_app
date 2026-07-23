@@ -40,25 +40,27 @@ class TouristService {
     }
   }
 
-// 4. Comprar/Reservar Experiencia
-Future<bool> buyExperience(int experienceId, String date, int slots) async {
-  try {
-    final response = await _api.client.post('carrito-comprar', data: {
-      'experience_id': experienceId,
-      'booking_date': date,
-      'slots': slots,
-    });
-    return response.statusCode == 201;
-  } catch (e) {
-    if (e is DioException) {
-      print('🔥 CÓDIGO: ${e.response?.statusCode}');
-      print('🔥 DETALLE DEL ERROR LARAVEL: ${e.response?.data}');
-    } else {
-      print('🔥 OTRO ERROR: $e');
+  // 4. Comprar/Reservar Experiencia (Actualizado con horarios)
+    Future<bool> buyExperience(int experienceId, int scheduleId, String date, int quantity) async {
+      try {
+        // Mantenemos tu ruta 'carrito-comprar' pero actualizamos los datos que enviamos
+        final response = await _api.client.post('carrito-comprar', data: {
+          'experience_id': experienceId,
+          'schedule_id': scheduleId,
+          'booking_date': date,
+          'quantity': quantity,
+        });
+        return response.statusCode == 201;
+      } catch (e) {
+        if (e is DioException) {
+          print('🔥 CÓDIGO: ${e.response?.statusCode}');
+          print('🔥 DETALLE DEL ERROR LARAVEL: ${e.response?.data}');
+        } else {
+          print('🔥 OTRO ERROR: $e');
+        }
+        return false;
+      }
     }
-    return false;
-  }
-}
 
   // 5. OBTENER MIS RESERVAS (¡Nueva función conectada al backend!)
 Future<List<dynamic>> getMyBookings() async {
@@ -93,6 +95,20 @@ Future<List<dynamic>> getMyBookings() async {
         print('🔥 ERROR INTERNO DE FLUTTER: $e');
       }
       return [];
+    }
+  }
+  // Función para obtener los horarios de una experiencia
+  Future<List<dynamic>> getSchedules(int experienceId) async {
+    try {
+      final response = await _api.client.get('experiencias/$experienceId/horarios');
+      
+      if (response.data is Map && response.data.containsKey('data')) {
+        return response.data['data'];
+      }
+      return response.data;
+    } catch (e) {
+      print('🔥 ERROR AL CARGAR HORARIOS: $e');
+      return []; // Si no hay horarios o hay error, regresamos lista vacía
     }
   }
 }

@@ -528,32 +528,32 @@ class _ReservationsTabState extends State<ReservationsTab> {
   }
 
   @override
-void didUpdateWidget(covariant ReservationsTab oldWidget) {
-  super.didUpdateWidget(oldWidget);
-  // Si antes no estaba logueado y ahora sí, o si está logueado pero aún no tenemos datos
-  if (widget.isLoggedIn && (!oldWidget.isLoggedIn || _bookings.isEmpty)) {
-    _loadBookings();
+  void didUpdateWidget(covariant ReservationsTab oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Si antes no estaba logueado y ahora sí, o si está logueado pero aún no tenemos datos
+    if (widget.isLoggedIn && (!oldWidget.isLoggedIn || _bookings.isEmpty)) {
+      _loadBookings();
+    }
   }
-}
 
   // 2. LA FUNCIÓN QUE CONECTA CON EL SERVICIO
-Future<void> _loadBookings() async {
-  print('🚀 _loadBookings() EJECUTÁNDOSE');
+  Future<void> _loadBookings() async {
+    print('🚀 _loadBookings() EJECUTÁNDOSE');
 
-  setState(() {
-    _loading = true;
-  });
+    setState(() {
+      _loading = true;
+    });
 
-  final reservas = await TouristService().getMyBookings();
+    final reservas = await TouristService().getMyBookings();
 
-  print('🚀 Reservas recibidas: ${reservas.length}');
-  print(reservas);
+    print('🚀 Reservas recibidas: ${reservas.length}');
+    print(reservas);
 
-  setState(() {
-    _bookings = reservas;
-    _loading = false;
-  });
-}
+    setState(() {
+      _bookings = reservas;
+      _loading = false;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -611,31 +611,29 @@ Future<void> _loadBookings() async {
                         final reserva = _bookings[index];
 
                         return Card(
-                          margin: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 8,
-                          ),
+                          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                           child: ListTile(
-                            leading: const Icon(Icons.event_available),
+                            leading: const Icon(Icons.event_available, color: Colors.green, size: 30),
                             title: Text(
-                              reserva['experience']?['title'] ??
-                                  'Experiencia',
+                              reserva['experience']?['name'] ?? reserva['experience']?['titulo'] ?? 'Experiencia',
+                              style: const TextStyle(fontWeight: FontWeight.bold),
                             ),
                             subtitle: Column(
-                              crossAxisAlignment:
-                                  CrossAxisAlignment.start,
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
+                                const SizedBox(height: 4),
+                                Text('Fecha: ${reserva['booking_date'] ?? 'Pendiente'}'),
+                                // Protegemos la lectura del horario por si es una reserva vieja de prueba
+                                Text('Hora: ${reserva['schedule'] != null ? reserva['schedule']['start_time'].toString().substring(0, 5) : 'N/A'}'),
+                                Text('Lugares: ${reserva['quantity'] ?? 1}'),
+                                const SizedBox(height: 4),
                                 Text(
-                                  'Fecha: ${reserva['booking_date'] ?? 'N/A'}',
-                                ),
-                                Text(
-                                  'Lugares: ${reserva['slots'] ?? 'N/A'}',
-                                ),
-                                Text(
-                                  'Estado: ${reserva['status'] ?? 'N/A'}',
+                                  'Estado: ${reserva['status'] == 'confirmed' ? 'Confirmada' : reserva['status']}',
+                                  style: TextStyle(color: Theme.of(context).colorScheme.primary, fontWeight: FontWeight.bold),
                                 ),
                               ],
                             ),
+                            isThreeLine: true,
                           ),
                         );
                       },
@@ -803,66 +801,192 @@ class _LoginTabState extends State<LoginTab> {
   }
 }
 
-
 // -----------------------------------------------------------------
-// PANTALLA DE DETALLE
+// PANTALLA DE DETALLE (ACTUALIZADA CON CALENDARIO Y HORARIOS)
 // -----------------------------------------------------------------
-class ExperienceDetailScreen extends StatelessWidget {
+class ExperienceDetailScreen extends StatefulWidget {
   final dynamic experience;
   final bool isLoggedIn;
 
   const ExperienceDetailScreen({super.key, required this.experience, required this.isLoggedIn});
 
   @override
+  State<ExperienceDetailScreen> createState() => _ExperienceDetailScreenState();
+}
+
+class _ExperienceDetailScreenState extends State<ExperienceDetailScreen> {
+  DateTime? _selectedDate;
+  List<dynamic> _availableSchedules = [];
+  int? _selectedScheduleId;
+  int _quantity = 1;
+  bool _isLoadingSchedules = false;
+
+  // Función para abrir el calendario
+  Future<void> _pickDate() async {
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: DateTime.now().add(const Duration(days: 1)),
+      firstDate: DateTime.now(), // No se puede reservar en el pasado
+      lastDate: DateTime.now().add(const Duration(days: 90)),
+    );
+
+    if (picked != null && picked != _selectedDate) {
+      setState(() {
+        _selectedDate = picked;
+        _selectedScheduleId = null; // Reseteamos la hora si cambia de día
+        _isLoadingSchedules = true;
+      });
+
+      // Consultamos a Laravel por los horarios de esta experiencia
+      int expId = int.tryParse(widget.experience['id'].toString()) ?? 0;
+      final schedules = await TouristService().getSchedules(expId);
+
+      // Filtramos para asegurar que el día de la semana coincide (opcional, si Laravel no lo filtró)
+      // day_of_week en tu BD: 1=Lunes, 7=Domingo. En Flutter: 1=Lunes, 7=Domingo.
+      final filteredSchedules = schedules.where((s) => s['day_of_week'] == picked.weekday).toList();
+
+      setState(() {
+        _availableSchedules = filteredSchedules;
+        _isLoadingSchedules = false;
+      });
+    }
+  }
+
+  // Calculadora de precio dinámico (igual a la de Laravel)
+  int _calculateTotalPrice() {
+    int basePrice = int.tryParse(widget.experience['price']?.toString() ?? '0') ?? 0;
+    int included = int.tryParse(widget.experience['included_persons']?.toString() ?? '1') ?? 1;
+    int extraPrice = int.tryParse(widget.experience['extra_person_price']?.toString() ?? '0') ?? 0;
+    
+    int extraPersons = (_quantity - included > 0) ? (_quantity - included) : 0;
+    return basePrice + (extraPersons * extraPrice);
+  }
+
+  @override
   Widget build(BuildContext context) {
-    String title = experience['name'] ?? experience['titulo'] ?? 'Experiencia';
-    var price = experience['price'] ?? experience['precio'] ?? 0;
-    String desc = experience['description'] ?? experience['descripcion'] ?? 'Sin descripción';
+    String title = widget.experience['name'] ?? widget.experience['titulo'] ?? 'Experiencia';
+    String desc = widget.experience['description'] ?? widget.experience['descripcion'] ?? 'Sin descripción';
+    int totalPrice = _calculateTotalPrice();
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(title), 
-        backgroundColor: Theme.of(context).colorScheme.primary, 
-        foregroundColor: Colors.white
+        title: Text(title),
+        backgroundColor: Theme.of(context).colorScheme.primary,
+        foregroundColor: Colors.white,
       ),
-      body: Padding(
+      body: SingleChildScrollView(
         padding: const EdgeInsets.all(24.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(title, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            Text('Precio: \$$price MXN', style: const TextStyle(fontSize: 18, color: Colors.green, fontWeight: FontWeight.bold)),
             const SizedBox(height: 16),
             Text(desc, style: const TextStyle(fontSize: 15)),
-            const Spacer(),
-            
-            // Botón de compra actualizado
+            const Divider(height: 40),
+
+            // 1. Selector de Fecha
+            const Text('1. Elige una fecha:', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: _pickDate,
+              icon: const Icon(Icons.calendar_month),
+              label: Text(_selectedDate == null 
+                  ? 'Seleccionar fecha en el calendario' 
+                  : '${_selectedDate!.day}/${_selectedDate!.month}/${_selectedDate!.year}'),
+            ),
+            const SizedBox(height: 20),
+
+            // 2. Selector de Horarios (Chips)
+            if (_selectedDate != null) ...[
+              const Text('2. Horarios disponibles:', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              _isLoadingSchedules 
+                  ? const CircularProgressIndicator()
+                  : _availableSchedules.isEmpty
+                      ? const Text('Lo sentimos, no hay horarios para este día.', style: TextStyle(color: Colors.red))
+                      : Wrap(
+                          spacing: 10,
+                          children: _availableSchedules.map((schedule) {
+                            final isSelected = _selectedScheduleId == schedule['id'];
+                            // Cortamos los segundos del horario (ej. 10:00:00 -> 10:00)
+                            final timeString = schedule['start_time'].toString().substring(0, 5); 
+                            
+                            return ChoiceChip(
+                              label: Text(timeString),
+                              selected: isSelected,
+                              onSelected: (selected) {
+                                setState(() => _selectedScheduleId = selected ? schedule['id'] : null);
+                              },
+                              selectedColor: Theme.of(context).colorScheme.secondary,
+                            );
+                          }).toList(),
+                        ),
+              const SizedBox(height: 20),
+            ],
+
+            // 3. Contador de Personas
+            const Text('3. ¿Cuántos asisten?', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                IconButton(
+                  onPressed: _quantity > 1 ? () => setState(() => _quantity--) : null,
+                  icon: const Icon(Icons.remove_circle_outline, size: 30),
+                ),
+                Text('$_quantity', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                IconButton(
+                  onPressed: () => setState(() => _quantity++),
+                  icon: const Icon(Icons.add_circle_outline, size: 30),
+                ),
+              ],
+            ),
+            const SizedBox(height: 32),
+
+            // Resumen y Botón de compra
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(color: Colors.grey[200], borderRadius: BorderRadius.circular(10)),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text('Total a pagar:', style: TextStyle(fontSize: 16)),
+                  Text('\$$totalPrice MXN', style: const TextStyle(fontSize: 22, color: Colors.green, fontWeight: FontWeight.bold)),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+
             ElevatedButton(
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFFC76A28),
                 foregroundColor: Colors.white,
-                minimumSize: const Size.fromHeight(50),
+                minimumSize: const Size.fromHeight(55),
               ),
               onPressed: () {
-                if (isLoggedIn) {
-                  // Redirigir a la pantalla de pago
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => PaymentScreen(
-                        experience: experience,
-                        isLoggedIn: isLoggedIn,
-                      ),
-                    ),
-                  );
-                } else {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Debes iniciar sesión para comprar.')),
-                  );
+                if (!widget.isLoggedIn) {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Debes iniciar sesión para reservar.')));
+                  return;
                 }
+                if (_selectedDate == null || _selectedScheduleId == null) {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Por favor elige una fecha y un horario.'), backgroundColor: Colors.orange));
+                  return;
+                }
+
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => PaymentScreen(
+                      experience: widget.experience,
+                      isLoggedIn: widget.isLoggedIn,
+                      bookingDate: '${_selectedDate!.year}-${_selectedDate!.month.toString().padLeft(2, '0')}-${_selectedDate!.day.toString().padLeft(2, '0')}',
+                      scheduleId: _selectedScheduleId!,
+                      quantity: _quantity,
+                      totalPrice: totalPrice,
+                    ),
+                  ),
+                );
               },
-              child: Text(isLoggedIn ? 'Comprar ahora' : 'Iniciar Sesión para Reservar'),
+              child: const Text('Completar Reserva', style: TextStyle(fontSize: 18)),
             ),
           ],
         ),
@@ -877,28 +1001,39 @@ class ExperienceDetailScreen extends StatelessWidget {
 class PaymentScreen extends StatefulWidget {
   final dynamic experience;
   final bool isLoggedIn;
+  final String bookingDate;
+  final int scheduleId;
+  final int quantity;
+  final int totalPrice;
 
-  const PaymentScreen({super.key, required this.experience, required this.isLoggedIn});
+  const PaymentScreen({
+    super.key, 
+    required this.experience, 
+    required this.isLoggedIn,
+    required this.bookingDate,
+    required this.scheduleId,
+    required this.quantity,
+    required this.totalPrice,
+  });
 
   @override
   State<PaymentScreen> createState() => _PaymentScreenState();
 }
 
 class _PaymentScreenState extends State<PaymentScreen> {
-  String _paymentMethod = 'tarjeta'; // 'tarjeta' o 'efectivo'
+  String _paymentMethod = 'tarjeta'; 
   bool _isProcessing = false;
 
   void _processPayment() async {
     setState(() => _isProcessing = true);
 
-    // Simulamos un pequeño tiempo de validación del banco o sistema
     await Future.delayed(const Duration(seconds: 2));
 
     final service = TouristService();
     int expId = int.tryParse(widget.experience['id'].toString()) ?? 0;
     
-    // Aquí es donde realmente llamamos al backend
-    bool success = await service.buyExperience(expId, "Fecha Pendiente", 1);
+    // Enviamos los datos completos al backend
+    bool success = await service.buyExperience(expId, widget.scheduleId, widget.bookingDate, widget.quantity);
 
     setState(() => _isProcessing = false);
 
@@ -907,13 +1042,12 @@ class _PaymentScreenState extends State<PaymentScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('¡Pago exitoso y reserva confirmada! 🎉'), backgroundColor: Colors.green),
         );
-        // Cerramos la ventana de pago y la de detalle, regresando al menú principal
         Navigator.of(context).popUntil((route) => route.isFirst);
       }
     } else {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Hubo un error al procesar tu pago.'), backgroundColor: Colors.red),
+          const SnackBar(content: Text('Error: Cruce de horarios o lugares insuficientes.'), backgroundColor: Colors.red),
         );
       }
     }
@@ -922,7 +1056,6 @@ class _PaymentScreenState extends State<PaymentScreen> {
   @override
   Widget build(BuildContext context) {
     String title = widget.experience['name'] ?? widget.experience['titulo'] ?? 'Experiencia';
-    var price = widget.experience['price'] ?? widget.experience['precio'] ?? 0;
 
     return Scaffold(
       appBar: AppBar(
@@ -935,19 +1068,18 @@ class _PaymentScreenState extends State<PaymentScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Resumen de la compra
-            Text('Resumen de compra', style: TextStyle(fontSize: 18, color: Theme.of(context).colorScheme.primary, fontWeight: FontWeight.bold)),
+            Text('Resumen de reserva', style: TextStyle(fontSize: 18, color: Theme.of(context).colorScheme.primary, fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
             Card(
               elevation: 2,
               child: ListTile(
                 title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
-                trailing: Text('\$$price MXN', style: const TextStyle(fontSize: 16, color: Colors.green, fontWeight: FontWeight.bold)),
+                subtitle: Text('Fecha: ${widget.bookingDate}\nLugares: ${widget.quantity}'),
+                trailing: Text('\$${widget.totalPrice} MXN', style: const TextStyle(fontSize: 16, color: Colors.green, fontWeight: FontWeight.bold)),
               ),
             ),
             const SizedBox(height: 24),
 
-            // Selector de Método de Pago
             Text('Método de pago', style: TextStyle(fontSize: 18, color: Theme.of(context).colorScheme.primary, fontWeight: FontWeight.bold)),
             Row(
               children: [
@@ -974,7 +1106,6 @@ class _PaymentScreenState extends State<PaymentScreen> {
             const Divider(),
             const SizedBox(height: 16),
 
-            // Opciones dinámicas según el método elegido
             if (_paymentMethod == 'tarjeta') ...[
               const TextField(
                 decoration: InputDecoration(labelText: 'Número de Tarjeta', border: OutlineInputBorder(), prefixIcon: Icon(Icons.credit_card)),
@@ -996,7 +1127,6 @@ class _PaymentScreenState extends State<PaymentScreen> {
                   children: [
                     const Text('Presenta este código en cualquier tienda afiliada (OXXO, 7-Eleven) para pagar tu reserva.', textAlign: TextAlign.center),
                     const SizedBox(height: 20),
-                    // Simulamos un código de barras con un ícono grande
                     const Icon(Icons.qr_code_2, size: 150),
                     const SizedBox(height: 8),
                     const Text('9876 5432 1098 7654', style: TextStyle(fontSize: 18, letterSpacing: 2, fontWeight: FontWeight.bold)),
@@ -1007,7 +1137,6 @@ class _PaymentScreenState extends State<PaymentScreen> {
 
             const SizedBox(height: 32),
             
-            // Botón de Pagar
             _isProcessing
                 ? const Center(child: CircularProgressIndicator())
                 : ElevatedButton(
@@ -1017,7 +1146,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
                       minimumSize: const Size.fromHeight(55),
                     ),
                     onPressed: _processPayment,
-                    child: Text(_paymentMethod == 'tarjeta' ? 'Pagar \$$price MXN' : 'Confirmar y Generar Orden', style: const TextStyle(fontSize: 18)),
+                    child: Text(_paymentMethod == 'tarjeta' ? 'Pagar \$${widget.totalPrice} MXN' : 'Confirmar y Generar Orden', style: const TextStyle(fontSize: 18)),
                   ),
           ],
         ),
