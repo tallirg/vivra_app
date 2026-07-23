@@ -626,7 +626,7 @@ Future<void> _fetchReservas() async {
                         child: ListTile(
                           leading: Icon(Icons.confirmation_number, color: Theme.of(context).colorScheme.primary),
                           title: Text(expName, style: const TextStyle(fontWeight: FontWeight.bold)),
-                          subtitle: Text('Fecha: $fecha - Hora: $hora'),
+                          subtitle: Text('Fecha: $fecha'),
                           trailing: Text('\$$total MXN', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.green)),
                         ),
                       );
