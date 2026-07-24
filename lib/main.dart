@@ -68,9 +68,10 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
   }
 
   // Actualizamos para recibir y guardar el rol
-  void _onLoginSuccess(String token, String role) async {
+  void _onLoginSuccess(String token, String role, String userId) async {
     await storage.write(key: 'auth_token', value: token);
     await storage.write(key: 'user_role', value: role);
+    await storage.write(key: 'user_id', value: userId); // <-- Guardamos el ID del usuario
     setState(() {
       _userToken = token;
       _userRole = role;
@@ -660,39 +661,301 @@ class _ReservationsTabState extends State<ReservationsTab> {
 }
 
 // -----------------------------------------------------------------
-// PESTAÑA 4: MENSAJES
+// PESTAÑA 4: MENSAJES (ESTRUCTURA DE DOS PESTAÑAS: IA + PRESTADORES)
 // -----------------------------------------------------------------
 class MessagesTab extends StatelessWidget {
   final bool isLoggedIn;
   final VoidCallback onGoToLogin;
 
-  const MessagesTab({super.key, required this.isLoggedIn, required this.onGoToLogin});
+  const MessagesTab({
+    super.key,
+    required this.isLoggedIn,
+    required this.onGoToLogin,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Mensajes con Prestadores'), backgroundColor: Theme.of(context).colorScheme.primary, foregroundColor: Colors.white),
-      body: !isLoggedIn
-          ? Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24.0),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(Icons.chat_bubble_outline, size: 80, color: Colors.grey),
-                    const SizedBox(height: 16),
-                    const Text('Inicia sesión para conversar con los guías y prestadores.', textAlign: TextAlign.center, style: TextStyle(fontSize: 16)),
-                    const SizedBox(height: 20),
-                    ElevatedButton(
-                      onPressed: onGoToLogin,
-                      style: ElevatedButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.primary, foregroundColor: Colors.white),
-                      child: const Text('Iniciar Sesión'),
-                    )
-                  ],
+    // 1. Si no ha iniciado sesión, se le pide ingresar
+    if (!isLoggedIn) {
+      return Scaffold(
+        appBar: AppBar(
+          title: const Text('Mensajes'),
+          backgroundColor: Theme.of(context).colorScheme.primary,
+          foregroundColor: Colors.white,
+        ),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24.0),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.chat_bubble_outline, size: 80, color: Colors.grey),
+                const SizedBox(height: 16),
+                const Text(
+                  'Inicia sesión para conversar con el asistente virtual o con los prestadores.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 16),
                 ),
+                const SizedBox(height: 20),
+                ElevatedButton(
+                  onPressed: onGoToLogin,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Theme.of(context).colorScheme.primary,
+                    foregroundColor: Colors.white,
+                  ),
+                  child: const Text('Iniciar Sesión'),
+                )
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    // 2. Si TIENE sesión, le mostramos la barra superior con 2 Pestañas
+    return DefaultTabController(
+      length: 2,
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('Mensajes'),
+          backgroundColor: Theme.of(context).colorScheme.primary,
+          foregroundColor: Colors.white,
+          bottom: const TabBar(
+            indicatorColor: Colors.white,
+            labelColor: Colors.white,
+            unselectedLabelColor: Colors.white70,
+            tabs: [
+              Tab(icon: Icon(Icons.smart_toy_outlined), text: 'Asistente IA'),
+              Tab(icon: Icon(Icons.people_outline), text: 'Prestadores'),
+            ],
+          ),
+        ),
+        body: const TabBarView(
+          children: [
+            // Pestaña 1: Conversación con Groq (Chatbot)
+            AiChatSubTab(),
+
+            // Pestaña 2: Chats directos con prestadores
+            Center(
+              child: Text(
+                'Tus conversaciones con prestadores aparecerán aquí',
+                style: TextStyle(color: Colors.grey, fontSize: 16),
               ),
-            )
-          : const Center(child: Text('No tienes conversaciones iniciadas.')),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// -----------------------------------------------------------------
+// SUB-PESTAÑA 1: CHATBOT INTERACTIVO DE IA (CONECTADO A GROQ)
+// -----------------------------------------------------------------
+class AiChatSubTab extends StatefulWidget {
+  const AiChatSubTab({super.key});
+
+  @override
+  State<AiChatSubTab> createState() => _AiChatSubTabState();
+}
+
+class _AiChatSubTabState extends State<AiChatSubTab> {
+  final TextEditingController _messageController = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
+  final Dio _dio = Dio();
+  final FlutterSecureStorage _storage = const FlutterSecureStorage();
+  final String _baseUrl = 'https://vivra-915z.onrender.com/api';
+
+  final List<Map<String, String>> _messages = [
+    {
+      'sender': 'bot',
+      'text': '¡Hola! 👋 Soy tu asistente virtual en Vivra. ¿Tienes alguna duda sobre nuestras experiencias o qué hacer en Oaxaca?'
+    }
+  ];
+
+  bool _isTyping = false;
+
+  Future<void> _sendMessage() async {
+    final text = _messageController.text.trim();
+    if (text.isEmpty || _isTyping) return;
+
+    _messageController.clear();
+
+    setState(() {
+      _messages.add({'sender': 'user', 'text': text});
+      _isTyping = true;
+    });
+
+    _scrollToBottom();
+
+    try {
+      String? token = await _storage.read(key: 'auth_token');
+
+      final response = await _dio.post(
+        '$_baseUrl/chat',
+        data: {'message': text},
+        options: Options(
+          headers: {
+            if (token != null) 'Authorization': 'Bearer $token',
+            'Accept': 'application/json',
+          },
+        ),
+      );
+
+      if (response.statusCode == 200 && response.data != null) {
+        String reply = response.data['reply'] ?? 'No recibí respuesta.';
+        setState(() {
+          _messages.add({'sender': 'bot', 'text': reply});
+        });
+      } else {
+        _showErrorBotMessage('Ocurrió un inconveniente al consultar con el asistente.');
+      }
+    } catch (e) {
+      debugPrint('Error en el Chatbot: $e');
+      _showErrorBotMessage('Lo siento, tuve problemas de conexión. Intenta de nuevo.');
+    } finally {
+      if (mounted) {
+        setState(() => _isTyping = false);
+        _scrollToBottom();
+      }
+    }
+  }
+
+  void _showErrorBotMessage(String error) {
+    if (mounted) {
+      setState(() {
+        _messages.add({'sender': 'bot', 'text': error});
+      });
+    }
+  }
+
+  void _scrollToBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final primaryColor = Theme.of(context).colorScheme.primary;
+
+    return Column(
+      children: [
+        // Lista de mensajes (Burbujas)
+        Expanded(
+          child: ListView.builder(
+            controller: _scrollController,
+            padding: const EdgeInsets.all(16),
+            itemCount: _messages.length,
+            itemBuilder: (context, index) {
+              final message = _messages[index];
+              final isUser = message['sender'] == 'user';
+
+              return Align(
+                alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
+                child: Container(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  constraints: BoxConstraints(
+                    maxWidth: MediaQuery.of(context).size.width * 0.78,
+                  ),
+                  decoration: BoxDecoration(
+                    color: isUser ? primaryColor : Colors.grey[200],
+                    borderRadius: BorderRadius.only(
+                      topLeft: const Radius.circular(16),
+                      topRight: const Radius.circular(16),
+                      bottomLeft: Radius.circular(isUser ? 16 : 0),
+                      bottomRight: Radius.circular(isUser ? 0 : 16),
+                    ),
+                  ),
+                  child: Text(
+                    message['text'] ?? '',
+                    style: TextStyle(
+                      color: isUser ? Colors.white : Colors.black87,
+                      fontSize: 15,
+                      height: 1.3,
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+
+        // Indicador de "Escribiendo..."
+        if (_isTyping)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: primaryColor),
+                ),
+                const SizedBox(width: 10),
+                Text(
+                  'El asistente está escribiendo...',
+                  style: TextStyle(color: Colors.grey[600], fontSize: 13, fontStyle: FontStyle.italic),
+                ),
+              ],
+            ),
+          ),
+
+        // Campo para escribir mensaje y botón enviar
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.05),
+                blurRadius: 5,
+                offset: const Offset(0, -2),
+              ),
+            ],
+          ),
+          child: SafeArea(
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _messageController,
+                    textCapitalization: TextCapitalization.sentences,
+                    decoration: InputDecoration(
+                      hintText: 'Pregunta sobre experiencias en Oaxaca...',
+                      hintStyle: TextStyle(color: Colors.grey[400], fontSize: 14),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                      filled: true,
+                      fillColor: Colors.grey[100],
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(25),
+                        borderSide: BorderSide.none,
+                      ),
+                    ),
+                    onSubmitted: (_) => _sendMessage(),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                CircleAvatar(
+                  backgroundColor: primaryColor,
+                  radius: 22,
+                  child: IconButton(
+                    icon: const Icon(Icons.send, color: Colors.white, size: 20),
+                    onPressed: _sendMessage,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -737,7 +1000,7 @@ class ProfileTab extends StatelessWidget {
 // -----------------------------------------------------------------
 class LoginTab extends StatefulWidget {
   final String baseUrl;
-  final Function(String, String) onLoginSuccess; 
+  final Function(String, String, String) onLoginSuccess;
 
   const LoginTab({super.key, required this.baseUrl, required this.onLoginSuccess});
 
@@ -768,10 +1031,14 @@ class _LoginTabState extends State<LoginTab> {
 
       if (response.statusCode == 200) {
         String token = response.data['token'] ?? response.data['access_token'] ?? '';
-        String role = response.data['role'] ?? response.data['rol'] ?? 'tourist'; 
+        String role = response.data['role'] ?? response.data['rol'] ?? 'tourist';
+        
+        // Extraemos el ID del usuario que devuelve Laravel
+        var user = response.data['user'] ?? response.data['usuario'];
+        String userId = user != null ? user['id'].toString() : (response.data['user_id']?.toString() ?? '');
         
         if (token.isNotEmpty) {
-          widget.onLoginSuccess(token, role); 
+          widget.onLoginSuccess(token, role, userId); 
         } else {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Error: El servidor no envió el token'), backgroundColor: Colors.red)
@@ -1531,19 +1798,14 @@ class _ProviderExperiencesTabState extends State<ProviderExperiencesTab> {
     _fetchMisExperiencias();
   }
 
-Future<void> _fetchMisExperiencias() async {
+  Future<void> _fetchMisExperiencias() async {
     setState(() => _loading = true);
     try {
       String? token = await _storage.read(key: 'auth_token');
+      String? savedUserId = await _storage.read(key: 'user_id');
       
-      final userResponse = await _dio.get(
-        '$_baseUrl/user',
-        options: Options(headers: {'Authorization': 'Bearer $token'}, receiveTimeout: const Duration(seconds: 5)),
-      );
-      
-      final int myUserId = userResponse.data['id'];
+      int myUserId = int.tryParse(savedUserId ?? '0') ?? 0;
 
-      // Guardamos el ID y el Token en el estado de la clase para pasárselos al formulario
       _myUserId = myUserId;
       _myToken = token;
 
@@ -1571,25 +1833,72 @@ Future<void> _fetchMisExperiencias() async {
     }
   }
 
-  void _confirmDelete(int id) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('¿Borrar experiencia?'),
-        content: const Text('Esta acción no se puede deshacer.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Borrando experiencia #$id... (En desarrollo)'), backgroundColor: Colors.red));
-            }, 
-            child: const Text('Borrar', style: TextStyle(color: Colors.red)),
-          ),
-        ],
+  Future<void> _deleteExperience(int id) async {
+  if (id == 0) return;
+
+  try {
+    String? token = _myToken ?? await _storage.read(key: 'auth_token');
+
+    // Enviamos POST con '_method': 'DELETE' para Method Spoofing en Laravel
+    final response = await _dio.post(
+      '$_baseUrl/experiencias/$id',
+      data: {
+        '_method': 'DELETE',
+      },
+      options: Options(
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Accept': 'application/json',
+        },
       ),
     );
+
+    if (response.statusCode == 200 || response.statusCode == 204) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Experiencia eliminada con éxito 🎉'), backgroundColor: Colors.green),
+        );
+        _fetchMisExperiencias();
+      }
+    }
+  } catch (e) {
+    debugPrint('🔥 Error al eliminar: $e');
+    String errorMessage = 'Error al eliminar la experiencia.';
+
+    if (e is DioException) {
+      final msg = e.response?.data != null ? e.response?.data['message'] : null;
+      errorMessage = 'Error (${e.response?.statusCode}): ${msg ?? "No se pudo eliminar"}';
+    }
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(errorMessage), backgroundColor: Colors.red, duration: const Duration(seconds: 4)),
+      );
+    }
   }
+}
+
+void _confirmDelete(dynamic expId) {
+  int id = int.tryParse(expId?.toString() ?? '0') ?? 0;
+
+  showDialog(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: const Text('¿Borrar experiencia?'),
+      content: const Text('Esta acción no se puede deshacer.'),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
+        TextButton(
+          onPressed: () async {
+            Navigator.pop(context);
+            await _deleteExperience(id);
+          }, 
+          child: const Text('Borrar', style: TextStyle(color: Colors.red)),
+        ),
+      ],
+    ),
+  );
+}
 
   @override
   Widget build(BuildContext context) {
@@ -1612,23 +1921,72 @@ Future<void> _fetchMisExperiencias() async {
                       const SizedBox(height: 24),
                       ElevatedButton.icon(
                         onPressed: () async {
-                          if (_myUserId != null && _myToken != null) {
-                            final result = await Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) => CreateExperienceScreen(
-                                  brandId: _myUserId!,
-                                  baseUrl: _baseUrl,
-                                  token: _myToken!,
-                                ),
+                        // 1. Verificamos o recuperamos el token guardado
+                        String? token = _myToken ?? await _storage.read(key: 'auth_token');
+                        
+                        if (token == null || token.isEmpty) {
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('No hay una sesión activa. Por favor vuelve a ingresar.'),
+                                backgroundColor: Colors.red,
                               ),
                             );
-
-                            if (result == true) {
-                              _fetchMisExperiencias();
-                            }
                           }
-                        },
+                          return;
+                        }
+
+                        // 2. Intentamos obtener la información del usuario enviando 'Accept: application/json'
+                        int? userId = _myUserId;
+                        if (userId == null) {
+                          try {
+                            final userResponse = await _dio.get(
+                              '$_baseUrl/user',
+                              options: Options(
+                                headers: {
+                                  'Authorization': 'Bearer $token',
+                                  'Accept': 'application/json', // <-- ENCABEZADO CLAVE PARA LARAVEL
+                                },
+                              ),
+                            );
+                            userId = userResponse.data['id'];
+                            _myUserId = userId;
+                            _myToken = token;
+                          } catch (e) {
+                            if (e is DioException) {
+                              debugPrint('🔥 CÓDIGO ERROR: ${e.response?.statusCode}');
+                              debugPrint('🔥 DETALLE LARAVEL: ${e.response?.data}');
+                            }
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text('Error al obtener usuario (${(e is DioException) ? e.response?.statusCode : "red"})'),
+                                  backgroundColor: Colors.red,
+                                ),
+                              );
+                            }
+                            return;
+                          }
+                        }
+
+                        // 3. Abrimos la pantalla para crear la experiencia
+                        if (context.mounted && userId != null) {
+                          final result = await Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => CreateExperienceScreen(
+                                brandId: userId!,
+                                baseUrl: _baseUrl,
+                                token: token,
+                              ),
+                            ),
+                          );
+
+                          if (result == true) {
+                            _fetchMisExperiencias();
+                          }
+                        }
+                      },
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Theme.of(context).colorScheme.primary,
                           foregroundColor: Colors.white,
@@ -1706,8 +2064,28 @@ Future<void> _fetchMisExperiencias() async {
                                       IconButton(
                                         icon: const Icon(Icons.edit, color: Colors.blue),
                                         tooltip: 'Editar',
-                                        onPressed: () {
-                                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Abriendo editor... (En desarrollo)')));
+                                        onPressed: () async {
+                                          String? token = _myToken ?? await _storage.read(key: 'auth_token');
+                                          String? savedUserId = await _storage.read(key: 'user_id');
+                                          int userId = _myUserId ?? int.tryParse(savedUserId ?? '0') ?? 0;
+
+                                          if (context.mounted && token != null) {
+                                            final result = await Navigator.push(
+                                              context,
+                                              MaterialPageRoute(
+                                                builder: (context) => CreateExperienceScreen(
+                                                  brandId: userId,
+                                                  baseUrl: _baseUrl,
+                                                  token: token,
+                                                  experience: exp, // <-- Pasamos el mapa con los datos de la experiencia actual
+                                                ),
+                                              ),
+                                            );
+
+                                            if (result == true) {
+                                              _fetchMisExperiencias(); // Recargamos para reflejar los cambios editados
+                                            }
+                                          }
                                         },
                                       ),
                                       IconButton(
@@ -1731,14 +2109,30 @@ Future<void> _fetchMisExperiencias() async {
             backgroundColor: Theme.of(context).colorScheme.primary,
             foregroundColor: Colors.white,
             onPressed: () async {
-              if (_myUserId != null && _myToken != null) {
+              String? token = _myToken ?? await _storage.read(key: 'auth_token');
+              String? savedUserId = await _storage.read(key: 'user_id');
+              int userId = _myUserId ?? int.tryParse(savedUserId ?? '0') ?? 0;
+
+              if (token == null || token.isEmpty || userId == 0) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Por favor, cierra sesión y vuelve a ingresar para sincronizar tu usuario.'),
+                      backgroundColor: Colors.orange,
+                    ),
+                  );
+                }
+                return;
+              }
+
+              if (context.mounted) {
                 final result = await Navigator.push(
                   context,
                   MaterialPageRoute(
                     builder: (context) => CreateExperienceScreen(
-                      brandId: _myUserId!,
+                      brandId: userId,
                       baseUrl: _baseUrl,
-                      token: _myToken!,
+                      token: token,
                     ),
                   ),
                 );
@@ -1765,12 +2159,242 @@ Future<void> _fetchMisExperiencias() async {
   }
 }
 
-class ProviderReservationsTab extends StatelessWidget {
+// =================================================================
+// MONITOR DE RESERVACIONES (PRESTADOR DE SERVICIOS)
+// =================================================================
+
+class ProviderReservationsTab extends StatefulWidget {
   const ProviderReservationsTab({super.key});
 
   @override
+  State<ProviderReservationsTab> createState() => _ProviderReservationsTabState();
+}
+
+class _ProviderReservationsTabState extends State<ProviderReservationsTab> {
+  final Dio _dio = Dio();
+  final _storage = const FlutterSecureStorage();
+  final String _baseUrl = 'https://vivra-915z.onrender.com/api';
+
+  List<dynamic> _reservaciones = [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchReservaciones();
+  }
+
+  Future<void> _fetchReservaciones() async {
+    setState(() => _loading = true);
+    try {
+      String? token = await _storage.read(key: 'auth_token');
+
+      if (token == null || token.isEmpty) {
+        if (mounted) setState(() => _loading = false);
+        return;
+      }
+
+      // Solicitamos a la API las reservas recibidas por este prestador
+      final response = await _dio.get(
+        '$_baseUrl/provider/reservaciones',
+        options: Options(
+          headers: {
+            'Authorization': 'Bearer $token',
+            'Accept': 'application/json',
+          },
+        ),
+      );
+
+      if (response.statusCode == 200) {
+        dynamic data = response.data;
+        List<dynamic> list = (data is List) ? data : (data['data'] ?? []);
+
+        if (mounted) {
+          setState(() {
+            _reservaciones = list;
+            _loading = false;
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('Error obteniendo reservaciones del prestador: $e');
+      if (mounted) {
+        setState(() => _loading = false);
+      }
+    }
+  }
+
+  Color _getStatusColor(String? status) {
+    switch (status?.toLowerCase()) {
+      case 'confirmed':
+      case 'confirmada':
+        return Colors.green;
+      case 'pending':
+      case 'pendiente':
+        return Colors.orange;
+      case 'cancelled':
+      case 'cancelada':
+        return Colors.red;
+      default:
+        return Colors.blue;
+    }
+  }
+
+  String _formatStatusText(String? status) {
+    switch (status?.toLowerCase()) {
+      case 'confirmed':
+        return 'Confirmada';
+      case 'pending':
+        return 'Pendiente';
+      case 'cancelled':
+        return 'Cancelada';
+      default:
+        return status ?? 'Desconocido';
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return const Center(child: Text('Monitor de Reservaciones (Próximamente)', style: TextStyle(fontSize: 18)));
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Monitor de Reservaciones'),
+        backgroundColor: Theme.of(context).colorScheme.primary,
+        foregroundColor: Colors.white,
+      ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : _reservaciones.isEmpty
+              ? Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.event_busy, size: 80, color: Colors.grey[400]),
+                      const SizedBox(height: 16),
+                      const Text(
+                        'Aún no tienes reservaciones recibidas.',
+                        style: TextStyle(fontSize: 16, color: Colors.grey),
+                      ),
+                      const SizedBox(height: 12),
+                      ElevatedButton.icon(
+                        onPressed: _fetchReservaciones,
+                        icon: const Icon(Icons.refresh),
+                        label: const Text('Actualizar'),
+                      ),
+                    ],
+                  ),
+                )
+              : RefreshIndicator(
+                  onRefresh: _fetchReservaciones,
+                  child: ListView.builder(
+                    padding: const EdgeInsets.all(16),
+                    itemCount: _reservaciones.length,
+                    itemBuilder: (context, index) {
+                      final reserva = _reservaciones[index];
+                      final experience = reserva['experience'] ?? {};
+                      final user = reserva['user'] ?? {};
+                      final schedule = reserva['schedule'] ?? {};
+
+                      String expName = experience['name'] ?? experience['titulo'] ?? 'Experiencia';
+                      String touristName = user['name'] ?? user['email'] ?? 'Turista no registrado';
+                      String bookingDate = reserva['booking_date'] ?? 'Sin fecha';
+                      String startTime = schedule['start_time'] != null
+                          ? schedule['start_time'].toString().substring(0, 5)
+                          : 'N/A';
+                      int quantity = int.tryParse(reserva['quantity']?.toString() ?? '1') ?? 1;
+                      String totalPrice = reserva['total_price']?.toString() ?? '0';
+                      String status = reserva['status']?.toString() ?? 'pending';
+
+                      Color statusColor = _getStatusColor(status);
+
+                      return Card(
+                        margin: const EdgeInsets.only(bottom: 16),
+                        elevation: 3,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        child: Padding(
+                          padding: const EdgeInsets.all(16.0),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              // Cabecera con título de la experiencia y Badge de Estado
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      expName,
+                                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                                    ),
+                                  ),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                    decoration: BoxDecoration(
+                                      color: statusColor.withOpacity(0.15),
+                                      borderRadius: BorderRadius.circular(20),
+                                      border: Border.all(color: statusColor, width: 1),
+                                    ),
+                                    child: Text(
+                                      _formatStatusText(status),
+                                      style: TextStyle(color: statusColor, fontWeight: FontWeight.bold, fontSize: 12),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const Divider(height: 24),
+
+                              // Detalles del turista y evento
+                              Row(
+                                children: [
+                                  const Icon(Icons.person_outline, size: 20, color: Colors.grey),
+                                  const SizedBox(width: 8),
+                                  Text('Reservado por: ', style: TextStyle(color: Colors.grey[700])),
+                                  Expanded(
+                                    child: Text(
+                                      touristName,
+                                      style: const TextStyle(fontWeight: FontWeight.bold),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              Row(
+                                children: [
+                                  const Icon(Icons.calendar_month, size: 20, color: Colors.grey),
+                                  const SizedBox(width: 8),
+                                  Text('Fecha: ', style: TextStyle(color: Colors.grey[700])),
+                                  Text(bookingDate, style: const TextStyle(fontWeight: FontWeight.w600)),
+                                  const SizedBox(width: 16),
+                                  const Icon(Icons.access_time, size: 20, color: Colors.grey),
+                                  const SizedBox(width: 4),
+                                  Text(startTime, style: const TextStyle(fontWeight: FontWeight.w600)),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Row(
+                                    children: [
+                                      const Icon(Icons.groups, size: 20, color: Colors.grey),
+                                      const SizedBox(width: 8),
+                                      Text('Lugares: ', style: TextStyle(color: Colors.grey[700])),
+                                      Text('$quantity persona(s)', style: const TextStyle(fontWeight: FontWeight.bold)),
+                                    ],
+                                  ),
+                                  Text(
+                                    '\$$totalPrice MXN',
+                                    style: const TextStyle(fontSize: 18, color: Colors.green, fontWeight: FontWeight.bold),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+    );
   }
 }
 
@@ -1781,34 +2405,57 @@ class CreateExperienceScreen extends StatefulWidget {
   final int brandId;
   final String baseUrl;
   final String token;
+  final dynamic experience; // Si es null = Crear nueva, si viene objeto = Editar
 
   const CreateExperienceScreen({
     super.key,
     required this.brandId,
     required this.baseUrl,
     required this.token,
+    this.experience,
   });
 
   @override
   State<CreateExperienceScreen> createState() => _CreateExperienceScreenState();
 }
 
+
+
 class _CreateExperienceScreenState extends State<CreateExperienceScreen> {
   final _formKey = GlobalKey<FormState>();
   final _dio = Dio();
   bool _isSaving = false;
 
-  // Controladores para los campos de texto
   final _titleController = TextEditingController();
   final _descController = TextEditingController();
   final _priceController = TextEditingController();
+  final _stockController = TextEditingController(text: '10');
   final _locationController = TextEditingController();
   final _includedPersonsController = TextEditingController(text: '1');
   final _extraPriceController = TextEditingController(text: '0');
   final _imageUrlController = TextEditingController();
 
-  // Categoría por defecto (Asumiendo 1=Gastronomía, 2=Artesanías, 3=Aventura)
   int _selectedCategoryId = 1;
+
+  @override
+  void initState() {
+    super.initState();
+    // Si viene información previa, precargamos todos los controladores para Editar
+    if (widget.experience != null) {
+      final exp = widget.experience;
+      _titleController.text = exp['name'] ?? exp['titulo'] ?? '';
+      _descController.text = exp['description'] ?? exp['descripcion'] ?? '';
+      _priceController.text = (exp['price'] ?? exp['precio'] ?? 0).toString();
+      _stockController.text = (exp['stock'] ?? 10).toString();
+      _includedPersonsController.text = (exp['included_persons'] ?? 1).toString();
+      _extraPriceController.text = (exp['extra_person_price'] ?? 0).toString();
+      _locationController.text = exp['location'] ?? exp['ubicacion'] ?? '';
+      _imageUrlController.text = exp['image'] ?? exp['imagen'] ?? '';
+
+      int catId = int.tryParse(exp['category_id']?.toString() ?? '1') ?? 1;
+      _selectedCategoryId = [1, 2, 3].contains(catId) ? catId : 1;
+    }
+  }
 
   Future<void> _saveExperience() async {
     if (!_formKey.currentState!.validate()) return;
@@ -1816,45 +2463,75 @@ class _CreateExperienceScreenState extends State<CreateExperienceScreen> {
     setState(() => _isSaving = true);
 
     try {
-      // Preparamos los datos para que coincidan con tu tabla 'articles'
-      final payload = {
+      final bool isEditing = widget.experience != null;
+      final dynamic expId = isEditing ? widget.experience['id'] : null;
+
+      final Map<String, dynamic> payload = {
         'name': _titleController.text.trim(),
         'description': _descController.text.trim(),
         'price': double.tryParse(_priceController.text) ?? 0,
+        'stock': int.tryParse(_stockController.text) ?? 0,
         'location': _locationController.text.trim(),
         'included_persons': int.tryParse(_includedPersonsController.text) ?? 1,
         'extra_person_price': double.tryParse(_extraPriceController.text) ?? 0,
         'image': _imageUrlController.text.trim(),
         'brand_id': widget.brandId,
         'category_id': _selectedCategoryId,
-        'active': 1, // Por defecto la creamos activa
+        'active': 1,
       };
 
-      // Hacemos el POST a la API
-      final response = await _dio.post(
-        '${widget.baseUrl}/articles', 
-        data: payload,
-        options: Options(
-          headers: {
-            'Authorization': 'Bearer ${widget.token}',
-            'Accept': 'application/json',
-          },
-        ),
+      // Si estamos editando, agregamos '_method': 'PUT' para Laravel
+      if (isEditing) {
+        payload['_method'] = 'PUT';
+      }
+
+      final String url = isEditing
+          ? '${widget.baseUrl}/experiencias/$expId'
+          : '${widget.baseUrl}/experiencias';
+
+      final options = Options(
+        headers: {
+          'Authorization': 'Bearer ${widget.token}',
+          'Accept': 'application/json',
+        },
       );
 
-      if (response.statusCode == 201 || response.statusCode == 200) {
+      // Siempre usamos .post() para evitar bloqueos HTTP en el servidor
+      final response = await _dio.post(url, data: payload, options: options);
+
+      if (response.statusCode == 200 || response.statusCode == 201) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('¡Experiencia creada con éxito! 🎉'), backgroundColor: Colors.green),
+            SnackBar(
+              content: Text(isEditing ? '¡Experiencia actualizada! 🎉' : '¡Experiencia creada con éxito! 🎉'),
+              backgroundColor: Colors.green,
+            ),
           );
-          Navigator.pop(context, true); // Regresamos y mandamos 'true' para indicar éxito
+          Navigator.pop(context, true);
         }
       }
     } catch (e) {
       debugPrint('Error guardando la experiencia: $e');
+      String errorMessage = 'Error al guardar en el servidor.';
+
+      if (e is DioException) {
+        debugPrint('🔥 CÓDIGO DE ERROR: ${e.response?.statusCode}');
+        debugPrint('🔥 RESPUESTA DE LARAVEL: ${e.response?.data}');
+        
+        if (e.response?.data != null && e.response?.data['message'] != null) {
+          errorMessage = 'Error (${e.response?.statusCode}): ${e.response?.data['message']}';
+        } else {
+          errorMessage = 'Error (${e.response?.statusCode}) en la solicitud.';
+        }
+      }
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Error al guardar. Revisa tu conexión o la API.'), backgroundColor: Colors.red),
+          SnackBar(
+            content: Text(errorMessage),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 4),
+          ),
         );
       }
     } finally {
@@ -1864,9 +2541,11 @@ class _CreateExperienceScreenState extends State<CreateExperienceScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final bool isEditing = widget.experience != null;
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Nueva Experiencia'),
+        title: Text(isEditing ? 'Editar Experiencia' : 'Nueva Experiencia'),
         backgroundColor: Theme.of(context).colorScheme.primary,
         foregroundColor: Colors.white,
       ),
@@ -1905,6 +2584,17 @@ class _CreateExperienceScreenState extends State<CreateExperienceScreen> {
               const Divider(height: 48),
 
               const Text('Precios y Logística', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _stockController,
+                decoration: const InputDecoration(
+                  labelText: 'Capacidad máxima / Cupo (Stock)',
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.groups),
+                ),
+                keyboardType: TextInputType.number,
+                validator: (v) => v!.isEmpty ? 'Requerido' : null,
+              ),
               const SizedBox(height: 16),
               Row(
                 children: [
@@ -1960,11 +2650,11 @@ class _CreateExperienceScreenState extends State<CreateExperienceScreen> {
                   : ElevatedButton(
                       onPressed: _saveExperience,
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.green,
+                        backgroundColor: isEditing ? Theme.of(context).colorScheme.primary : Colors.green,
                         foregroundColor: Colors.white,
                         minimumSize: const Size.fromHeight(55),
                       ),
-                      child: const Text('Publicar Experiencia', style: TextStyle(fontSize: 18)),
+                      child: Text(isEditing ? 'Guardar Cambios' : 'Publicar Experiencia', style: const TextStyle(fontSize: 18)),
                     ),
             ],
           ),
