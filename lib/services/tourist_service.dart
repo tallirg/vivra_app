@@ -62,7 +62,7 @@
         }
       }
 
-    // 5. OBTENER MIS RESERVAS (¡Nueva función conectada al backend!)
+    // 5. OBTENER MIS RESERVAS 
   Future<List<dynamic>> getMyBookings() async {
       try {
         print('🔥 1. SOLICITANDO RESERVAS AL SERVIDOR...');

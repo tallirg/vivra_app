@@ -542,25 +542,22 @@ class _ReservationsTabState extends State<ReservationsTab> {
     }
   }
 
-  // 2. Corregimos la petición con timeout y bloque finally para asegurar que siempre Quite el cargador
-  // Ubicación: lib/main.dart -> dentro de _ReservationsTabState
-Future<void> _fetchReservas() async {
-  try {
-    final list = await TouristService().getMyBookings();
-
-    if (mounted) {
-      setState(() {
-        _reservas = list;
-      });
-    }
-  } catch (e) {
-    debugPrint('Error obteniendo reservas: $e');
-  } finally {
-    if (mounted) {
-      setState(() => _loading = false);
+  Future<void> _fetchReservas() async {
+    try {
+      final list = await TouristService().getMyBookings();
+      if (mounted) {
+        setState(() {
+          _reservas = list;
+        });
+      }
+    } catch (e) {
+      debugPrint('Error obteniendo reservas: $e');
+    } finally {
+      if (mounted) {
+        setState(() => _loading = false);
+      }
     }
   }
-}
 
   @override
   Widget build(BuildContext context) {
@@ -616,18 +613,45 @@ Future<void> _fetchReservas() async {
                     padding: const EdgeInsets.all(16),
                     itemCount: _reservas.length,
                     itemBuilder: (context, index) {
-                      final item = _reservas[index];
-                      String expName = item['experience']?['name'] ?? item['nombre'] ?? 'Reserva #${item['id']}';
-                      String fecha = item['booking_date'] ?? 'Sin fecha';
-                      var total = item['total_price'] ?? 0;
-
+                      final reserva = _reservas[index];
                       return Card(
-                        margin: const EdgeInsets.only(bottom: 12),
-                        child: ListTile(
-                          leading: Icon(Icons.confirmation_number, color: Theme.of(context).colorScheme.primary),
-                          title: Text(expName, style: const TextStyle(fontWeight: FontWeight.bold)),
-                          subtitle: Text('Fecha: $fecha'),
-                          trailing: Text('\$$total MXN', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.green)),
+                        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(12),
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => ReservationDetailScreen(reserva: reserva),
+                              ),
+                            );
+                          },
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 8.0),
+                            child: ListTile(
+                              leading: const Icon(Icons.event_available, color: Colors.green, size: 30),
+                              title: Text(
+                                reserva['experience']?['name'] ?? reserva['experience']?['titulo'] ?? 'Experiencia',
+                                style: const TextStyle(fontWeight: FontWeight.bold),
+                              ),
+                              subtitle: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const SizedBox(height: 4),
+                                  Text('Fecha: ${reserva['booking_date'] ?? 'Pendiente'}'),
+                                  Text('Hora: ${reserva['schedule'] != null ? reserva['schedule']['start_time'].toString().substring(0, 5) : 'N/A'}'),
+                                  Text('Lugares: ${reserva['quantity'] ?? 1}'),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    'Estado: ${reserva['status'] == 'confirmed' ? 'Confirmada' : reserva['status']}',
+                                    style: TextStyle(color: Theme.of(context).colorScheme.primary, fontWeight: FontWeight.bold),
+                                  ),
+                                ],
+                              ),
+                              isThreeLine: true,
+                              trailing: const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.grey),
+                            ),
+                          ),
                         ),
                       );
                     },
@@ -854,7 +878,8 @@ class _ExperienceDetailScreenState extends State<ExperienceDetailScreen> {
     if (picked != null && picked != _selectedDate) {
       setState(() {
         _selectedDate = picked;
-        _selectedScheduleId = null; // Reseteamos la hora si cambia de día
+        _selectedScheduleId = null; 
+        _quantity = 1; // Reseteamos la cantidad por seguridad al cambiar de día
         _isLoadingSchedules = true;
       });
 
@@ -862,8 +887,6 @@ class _ExperienceDetailScreenState extends State<ExperienceDetailScreen> {
       int expId = int.tryParse(widget.experience['id'].toString()) ?? 0;
       final schedules = await TouristService().getSchedules(expId);
 
-      // Filtramos para asegurar que el día de la semana coincide (opcional, si Laravel no lo filtró)
-      // day_of_week en tu BD: 1=Lunes, 7=Domingo. En Flutter: 1=Lunes, 7=Domingo.
       final filteredSchedules = schedules.where((s) => s['day_of_week'] == picked.weekday).toList();
 
       setState(() {
@@ -873,24 +896,37 @@ class _ExperienceDetailScreenState extends State<ExperienceDetailScreen> {
     }
   }
 
-  // Calculadora de precio dinámico (Corregida)
-    int _calculateTotalPrice() {
-      // Ahora busca tanto 'price' como 'precio'
-      String priceStr = widget.experience['price']?.toString() ?? widget.experience['precio']?.toString() ?? '0';
-      int basePrice = int.tryParse(priceStr) ?? 0;
-      
-      int included = int.tryParse(widget.experience['included_persons']?.toString() ?? '1') ?? 1;
-      int extraPrice = int.tryParse(widget.experience['extra_person_price']?.toString() ?? '0') ?? 0;
-      
-      int extraPersons = (_quantity - included > 0) ? (_quantity - included) : 0;
-      return basePrice + (extraPersons * extraPrice);
-    }
+  // Calculadora de precio dinámico (A prueba de decimales)
+  int _calculateTotalPrice() {
+    String priceStr = widget.experience['price']?.toString() ?? widget.experience['precio']?.toString() ?? '0';
+    String extraPriceStr = widget.experience['extra_person_price']?.toString() ?? '0';
+    String includedStr = widget.experience['included_persons']?.toString() ?? '1';
+
+    int basePrice = double.tryParse(priceStr)?.toInt() ?? 0;
+    int extraPrice = double.tryParse(extraPriceStr)?.toInt() ?? 0;
+    int included = double.tryParse(includedStr)?.toInt() ?? 1;
+    
+    int extraPersons = (_quantity - included > 0) ? (_quantity - included) : 0;
+    return basePrice + (extraPersons * extraPrice);
+  }
 
   @override
   Widget build(BuildContext context) {
     String title = widget.experience['name'] ?? widget.experience['titulo'] ?? 'Experiencia';
     String desc = widget.experience['description'] ?? widget.experience['descripcion'] ?? 'Sin descripción';
     int totalPrice = _calculateTotalPrice();
+
+    // 🌟 NUEVO: Calculamos el stock máximo del horario seleccionado
+    int maxStock = 99; // Límite alto por defecto si no ha elegido hora
+    if (_selectedScheduleId != null) {
+      final schedule = _availableSchedules.firstWhere(
+        (s) => s['id'] == _selectedScheduleId, 
+        orElse: () => null
+      );
+      if (schedule != null) {
+        maxStock = int.tryParse(schedule['stock'].toString()) ?? 99;
+      }
+    }
 
     return Scaffold(
       appBar: AppBar(
@@ -932,14 +968,29 @@ class _ExperienceDetailScreenState extends State<ExperienceDetailScreen> {
                           spacing: 10,
                           children: _availableSchedules.map((schedule) {
                             final isSelected = _selectedScheduleId == schedule['id'];
-                            // Cortamos los segundos del horario (ej. 10:00:00 -> 10:00)
                             final timeString = schedule['start_time'].toString().substring(0, 5); 
                             
                             return ChoiceChip(
                               label: Text(timeString),
                               selected: isSelected,
                               onSelected: (selected) {
-                                setState(() => _selectedScheduleId = selected ? schedule['id'] : null);
+                                setState(() {
+                                  _selectedScheduleId = selected ? schedule['id'] : null;
+                                  
+                                  // 🌟 NUEVO: Auto-corregir la cantidad si excede el nuevo horario
+                                  if (selected) {
+                                    int scheduleStock = int.tryParse(schedule['stock'].toString()) ?? 99;
+                                    if (_quantity > scheduleStock) {
+                                      _quantity = scheduleStock;
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(
+                                          content: Text('Ajustamos tus lugares a $scheduleStock (Cupo máximo del horario)'),
+                                          backgroundColor: Colors.orange,
+                                        ),
+                                      );
+                                    }
+                                  }
+                                });
                               },
                               selectedColor: Theme.of(context).colorScheme.secondary,
                             );
@@ -955,13 +1006,23 @@ class _ExperienceDetailScreenState extends State<ExperienceDetailScreen> {
               children: [
                 IconButton(
                   onPressed: _quantity > 1 ? () => setState(() => _quantity--) : null,
-                  icon: const Icon(Icons.remove_circle_outline, size: 30),
+                  icon: Icon(Icons.remove_circle_outline, size: 30, color: _quantity > 1 ? Colors.black : Colors.grey),
                 ),
                 Text('$_quantity', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                // 🌟 NUEVO: Freno visual en el botón de agregar
                 IconButton(
-                  onPressed: () => setState(() => _quantity++),
-                  icon: const Icon(Icons.add_circle_outline, size: 30),
+                  onPressed: _quantity < maxStock ? () => setState(() => _quantity++) : null,
+                  icon: Icon(
+                    Icons.add_circle_outline, 
+                    size: 30, 
+                    color: _quantity < maxStock ? Colors.black : Colors.grey
+                  ),
                 ),
+                if (_selectedScheduleId != null && _quantity == maxStock)
+                  const Padding(
+                    padding: EdgeInsets.only(left: 8.0),
+                    child: Text('(Cupo lleno)', style: TextStyle(color: Colors.red, fontSize: 12)),
+                  )
               ],
             ),
             const SizedBox(height: 32),
@@ -993,6 +1054,14 @@ class _ExperienceDetailScreenState extends State<ExperienceDetailScreen> {
                 }
                 if (_selectedDate == null || _selectedScheduleId == null) {
                   ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Por favor elige una fecha y un horario.'), backgroundColor: Colors.orange));
+                  return;
+                }
+                
+                // 🌟 NUEVO: Última barrera de seguridad antes de pasar a la pantalla de pago
+                if (_quantity > maxStock) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Solo quedan $maxStock lugares disponibles.'), backgroundColor: Colors.red)
+                  );
                   return;
                 }
 
@@ -1047,10 +1116,25 @@ class PaymentScreen extends StatefulWidget {
 class _PaymentScreenState extends State<PaymentScreen> {
   String _paymentMethod = 'tarjeta'; 
   bool _isProcessing = false;
+  
+  // Llave global para controlar las validaciones del formulario
+  final _formKey = GlobalKey<FormState>();
 
   void _processPayment() async {
+    // Si el usuario eligió tarjeta, primero validamos el formulario
+    if (_paymentMethod == 'tarjeta') {
+      if (!_formKey.currentState!.validate()) {
+        // Si hay errores (faltan datos, formato incorrecto), detenemos el pago
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Por favor revisa los datos de tu tarjeta.'), backgroundColor: Colors.orange),
+        );
+        return;
+      }
+    }
+
     setState(() => _isProcessing = true);
 
+    // Simulamos validación bancaria
     await Future.delayed(const Duration(seconds: 2));
 
     final service = TouristService();
@@ -1075,6 +1159,54 @@ class _PaymentScreenState extends State<PaymentScreen> {
         );
       }
     }
+  }
+
+  // Generador de código de barras realista (sin paquetes externos)
+  Widget _buildRealisticBarcode() {
+    // Patrón de grosores simulando un código real
+    final widths = [3.0, 1.0, 4.0, 2.0, 1.0, 5.0, 2.0, 1.0, 3.0, 4.0, 1.0, 2.0];
+    
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.grey.shade300, width: 2),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 5),
+          )
+        ]
+      ),
+      child: Column(
+        children: [
+          const Text('REFERENCIA DE PAGO', style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold, letterSpacing: 1.5)),
+          const SizedBox(height: 16),
+          // Dibujamos las barras iterando la lista de grosores
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: List.generate(28, (index) {
+              return Container(
+                width: widths[index % widths.length],
+                height: 80,
+                color: Colors.black,
+                margin: const EdgeInsets.only(right: 2.5),
+              );
+            }),
+          ),
+          const SizedBox(height: 16),
+          // Número de referencia espaciado tipo ticket
+          const Text(
+            '9876  5432  1098  7654', 
+            style: TextStyle(fontSize: 18, letterSpacing: 2, fontFamily: 'monospace', fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          const Text('Válido por 24 horas', style: TextStyle(color: Colors.redAccent, fontSize: 12, fontWeight: FontWeight.bold)),
+        ],
+      ),
+    );
   }
 
   @override
@@ -1130,37 +1262,85 @@ class _PaymentScreenState extends State<PaymentScreen> {
             const Divider(),
             const SizedBox(height: 16),
 
-            if (_paymentMethod == 'tarjeta') ...[
-              const TextField(
-                decoration: InputDecoration(labelText: 'Número de Tarjeta', border: OutlineInputBorder(), prefixIcon: Icon(Icons.credit_card)),
-                keyboardType: TextInputType.number,
-              ),
-              const SizedBox(height: 16),
-              Row(
-                children: const [
-                  Expanded(child: TextField(decoration: InputDecoration(labelText: 'Vencimiento (MM/AA)', border: OutlineInputBorder()))),
-                  SizedBox(width: 16),
-                  Expanded(child: TextField(decoration: InputDecoration(labelText: 'CVV', border: OutlineInputBorder()), obscureText: true)),
-                ],
-              ),
-              const SizedBox(height: 16),
-              const TextField(decoration: InputDecoration(labelText: 'Nombre del Titular', border: OutlineInputBorder())),
-            ] else ...[
+            // Formulario de Tarjeta con Validaciones
+            if (_paymentMethod == 'tarjeta') 
+              Form(
+                key: _formKey,
+                child: Column(
+                  children: [
+                    TextFormField(
+                      decoration: const InputDecoration(labelText: 'Número de Tarjeta', border: OutlineInputBorder(), prefixIcon: Icon(Icons.credit_card)),
+                      keyboardType: TextInputType.number,
+                      maxLength: 16, // Limita visualmente a 16 dígitos
+                      validator: (value) {
+                        if (value == null || value.isEmpty) return 'El número es requerido';
+                        if (value.length < 16) return 'Debe tener 16 dígitos';
+                        if (int.tryParse(value) == null) return 'Solo se aceptan números';
+                        return null;
+                      },
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start, // Para que el error no descuadre la fila
+                      children: [
+                        Expanded(
+                          child: TextFormField(
+                            decoration: const InputDecoration(labelText: 'Vencimiento (MM/AA)', border: OutlineInputBorder()),
+                            maxLength: 5,
+                            validator: (value) {
+                              if (value == null || value.isEmpty) return 'Requerido';
+                              // Expresión regular que obliga a poner Mes (01-12) / Año (2 dígitos)
+                              if (!RegExp(r'^(0[1-9]|1[0-2])\/\d{2}$').hasMatch(value)) {
+                                return 'Formato incorrecto';
+                              }
+                              return null;
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: TextFormField(
+                            decoration: const InputDecoration(labelText: 'CVV', border: OutlineInputBorder()),
+                            obscureText: true,
+                            keyboardType: TextInputType.number,
+                            maxLength: 4,
+                            validator: (value) {
+                              if (value == null || value.isEmpty) return 'Requerido';
+                              if (value.length < 3) return 'Mín. 3 dígitos';
+                              return null;
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    TextFormField(
+                      decoration: const InputDecoration(labelText: 'Nombre del Titular', border: OutlineInputBorder(), prefixIcon: Icon(Icons.person_outline)),
+                      textCapitalization: TextCapitalization.words,
+                      validator: (value) {
+                        if (value == null || value.trim().isEmpty) return 'El nombre es requerido';
+                        if (value.trim().length < 4) return 'Ingresa tu nombre completo';
+                        return null;
+                      },
+                    ),
+                  ],
+                ),
+              ) 
+            else 
               Center(
                 child: Column(
                   children: [
-                    const Text('Presenta este código en cualquier tienda afiliada (OXXO, 7-Eleven) para pagar tu reserva.', textAlign: TextAlign.center),
+                    const Text('Presenta este ticket en las cajas de cualquier tienda afiliada (OXXO, 7-Eleven, Farmacias del Ahorro) para pagar tu reserva.', textAlign: TextAlign.center),
                     const SizedBox(height: 20),
-                    const Icon(Icons.qr_code_2, size: 150),
-                    const SizedBox(height: 8),
-                    const Text('9876 5432 1098 7654', style: TextStyle(fontSize: 18, letterSpacing: 2, fontWeight: FontWeight.bold)),
+                    // Nuestro nuevo código de barras super realista
+                    _buildRealisticBarcode(),
                   ],
                 ),
               ),
-            ],
 
             const SizedBox(height: 32),
             
+            // Botón de Pagar
             _isProcessing
                 ? const Center(child: CircularProgressIndicator())
                 : ElevatedButton(
@@ -1168,12 +1348,194 @@ class _PaymentScreenState extends State<PaymentScreen> {
                       backgroundColor: Colors.green,
                       foregroundColor: Colors.white,
                       minimumSize: const Size.fromHeight(55),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     ),
                     onPressed: _processPayment,
-                    child: Text(_paymentMethod == 'tarjeta' ? 'Pagar \$${widget.totalPrice} MXN' : 'Confirmar y Generar Orden', style: const TextStyle(fontSize: 18)),
+                    child: Text(_paymentMethod == 'tarjeta' ? 'Pagar \$${widget.totalPrice} MXN' : 'Confirmar y Generar Orden', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                   ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+// -----------------------------------------------------------------
+// PANTALLA DE DETALLE DE LA RESERVA
+// -----------------------------------------------------------------
+class ReservationDetailScreen extends StatelessWidget {
+  final dynamic reserva;
+
+  const ReservationDetailScreen({super.key, required this.reserva});
+
+  @override
+  Widget build(BuildContext context) {
+    // Extraemos las cajas de información para no escribir tanto
+    final experience = reserva['experience'] ?? {};
+    final schedule = reserva['schedule'] ?? {};
+    
+    // Asignamos las variables de forma segura
+    String title = experience['name'] ?? experience['titulo'] ?? 'Experiencia';
+    String location = experience['location'] ?? 'Ubicación no especificada';
+    String date = reserva['booking_date'] ?? 'Pendiente';
+    String time = schedule['start_time'] != null ? schedule['start_time'].toString().substring(0, 5) : 'Por definir';
+    String quantity = reserva['quantity']?.toString() ?? '1';
+    String totalPrice = reserva['total_price']?.toString() ?? '0';
+    String status = reserva['status'] == 'confirmed' ? 'Confirmada' : (reserva['status'] ?? 'Pendiente');
+    String imageUrl = experience['image'] ?? experience['imagen'] ?? '';
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Detalle de Reserva'),
+        backgroundColor: Theme.of(context).colorScheme.primary,
+        foregroundColor: Colors.white,
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(24.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // 1. Imagen de la Experiencia
+            if (imageUrl.isNotEmpty)
+              ClipRRect(
+                borderRadius: BorderRadius.circular(16),
+                child: Image.network(
+                  imageUrl,
+                  height: 200,
+                  width: double.infinity,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => _buildPlaceholderImage(context),
+                ),
+              )
+            else
+              _buildPlaceholderImage(context),
+            
+            const SizedBox(height: 24),
+            
+            // 2. Título y Etiqueta de Estado
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Text(title, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: status == 'Confirmada' ? Colors.green[100] : Colors.orange[100],
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    status,
+                    style: TextStyle(
+                      color: status == 'Confirmada' ? Colors.green[800] : Colors.orange[800],
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 24),
+
+            // 3. Tarjeta de Logística (Fecha, Hora, Personas, Lugar)
+            const Text('Información del evento', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            Card(
+              elevation: 2,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  children: [
+                    _buildDetailRow(Icons.calendar_month, 'Fecha', date),
+                    const Divider(),
+                    _buildDetailRow(Icons.access_time, 'Hora de inicio', time),
+                    const Divider(),
+                    _buildDetailRow(Icons.group, 'Personas', quantity),
+                    const Divider(),
+                    _buildDetailRow(Icons.location_on, 'Ubicación', location),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 24),
+
+            // 4. Resumen de Pago
+            const Text('Resumen de Pago', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.grey[200],
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text('Total Pagado:', style: TextStyle(fontSize: 16)),
+                  Text(
+                    '\$$totalPrice MXN',
+                    style: const TextStyle(fontSize: 22, color: Colors.green, fontWeight: FontWeight.bold),
+                  ),
+                ],
+              ),
+            ),
+            
+            const SizedBox(height: 32),
+            
+            // 5. Botón de Ayuda
+            OutlinedButton.icon(
+              onPressed: () {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Abriendo chat con el prestador... (En desarrollo)')),
+                );
+              },
+              icon: const Icon(Icons.chat_bubble_outline),
+              label: const Text('Contactar al Prestador'),
+              style: OutlinedButton.styleFrom(
+                minimumSize: const Size.fromHeight(50),
+                foregroundColor: Theme.of(context).colorScheme.primary,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Componente auxiliar para pintar una imagen vacía si no tiene foto
+  Widget _buildPlaceholderImage(BuildContext context) {
+    return Container(
+      height: 200,
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.primary.withOpacity(0.15),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Icon(Icons.landscape, size: 80, color: Theme.of(context).colorScheme.primary),
+    );
+  }
+
+  // Componente auxiliar para crear las filas con íconos de la tarjeta logística
+  Widget _buildDetailRow(IconData icon, String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8.0),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: Colors.grey[700], size: 24),
+          const SizedBox(width: 12),
+          Text('$label:', style: const TextStyle(fontSize: 16, color: Colors.black54)),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              value,
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+              textAlign: TextAlign.end,
+            ),
+          ),
+        ],
       ),
     );
   }
