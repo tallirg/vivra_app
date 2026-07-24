@@ -44,8 +44,9 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
   final storage = const FlutterSecureStorage();
   bool _isLoggedIn = false;
   String? _userToken;
-  
-  // IP de tu servidor Ubuntu
+  String _userRole = 'tourist'; // Variable para controlar la vista actual
+
+  // 🌟 Variables globales que necesitan las pestañas (URL de producción)
   final String _baseUrl = 'https://vivra-915z.onrender.com/api';
   final List<String> _favoritosLocales = [];
 
@@ -57,109 +58,111 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
 
   Future<void> _checkAuthStatus() async {
     String? token = await storage.read(key: 'auth_token');
+    String? role = await storage.read(key: 'user_role');
+    
     setState(() {
       _userToken = token;
+      _userRole = role ?? 'tourist'; // Si no hay sesión, asumimos turista por defecto
       _isLoggedIn = token != null && token.isNotEmpty;
     });
   }
 
-  void _onLoginSuccess(String token) async {
+  // Actualizamos para recibir y guardar el rol
+  void _onLoginSuccess(String token, String role) async {
     await storage.write(key: 'auth_token', value: token);
+    await storage.write(key: 'user_role', value: role);
     setState(() {
       _userToken = token;
+      _userRole = role;
       _isLoggedIn = true;
-      _currentIndex = 0; // Regresa a la pestaña de Explora al iniciar sesión
+      _currentIndex = 0;
     });
   }
 
   void _onLogout() async {
     await storage.delete(key: 'auth_token');
+    await storage.delete(key: 'user_role');
     setState(() {
       _userToken = null;
+      _userRole = 'tourist'; // Volvemos a vista de turista al salir
       _isLoggedIn = false;
       _currentIndex = 0;
     });
   }
 
+  // Función para manejar los favoritos locales
+  void _toggleFavorite(String id) {
+    setState(() {
+      if (_favoritosLocales.contains(id)) {
+        _favoritosLocales.remove(id);
+      } else {
+        _favoritosLocales.add(id);
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
-    final List<Widget> pages = [
-      // 1. Explora
-      ExploreTab(
-        baseUrl: _baseUrl,
-        favoritosLocales: _favoritosLocales,
-        isLoggedIn: _isLoggedIn,
-        onFavoriteToggle: (id) {
-          setState(() {
-            _favoritosLocales.contains(id)
-                ? _favoritosLocales.remove(id)
-                : _favoritosLocales.add(id);
-          });
-        },
-      ),
-      // 2. Favoritos
-      FavoritesTab(
-        baseUrl: _baseUrl,
-        favoritosLocales: _favoritosLocales,
-      ),
-      // 3. Reservaciones
-      ReservationsTab(
-        isLoggedIn: _isLoggedIn,
-        onGoToLogin: () => setState(() => _currentIndex = 4),
-        baseUrl: _baseUrl, // 👈 Faltaba esta línea
-      ),
-      // 4. Mensajes
-      MessagesTab(
-        isLoggedIn: _isLoggedIn,
-        onGoToLogin: () => setState(() => _currentIndex = 4),
-      ),
-      // 5. Perfil / Iniciar Sesión
-      _isLoggedIn
-          ? ProfileTab(onLogout: _onLogout)
-          : LoginTab(baseUrl: _baseUrl, onLoginSuccess: _onLoginSuccess),
-    ];
+    // 🌟 DEFINIMOS LAS PANTALLAS DINÁMICAMENTE (CON TODOS SUS PARÁMETROS EXACTOS)
+    final List<Widget> pages = _userRole == 'provider'
+        ? [
+            const ProviderDashboardTab(),       
+            const ProviderExperiencesTab(),     
+            const ProviderReservationsTab(),    
+            MessagesTab(isLoggedIn: _isLoggedIn, onGoToLogin: () => setState(() => _currentIndex = 4)), 
+            ProfileTab(onLogout: _onLogout),    
+          ]
+        : [
+            ExploreTab(
+              baseUrl: _baseUrl,
+              favoritosLocales: _favoritosLocales,
+              onFavoriteToggle: _toggleFavorite,
+              isLoggedIn: _isLoggedIn,
+            ), 
+            FavoritesTab(
+              baseUrl: _baseUrl,
+              favoritosLocales: _favoritosLocales,
+            ),
+            ReservationsTab(
+              isLoggedIn: _isLoggedIn,
+              onGoToLogin: () => setState(() => _currentIndex = 4),
+              baseUrl: _baseUrl,
+            ),
+            MessagesTab(
+              isLoggedIn: _isLoggedIn, 
+              onGoToLogin: () => setState(() => _currentIndex = 4)
+            ),
+            _isLoggedIn 
+              ? ProfileTab(onLogout: _onLogout) 
+              : LoginTab(baseUrl: _baseUrl, onLoginSuccess: _onLoginSuccess),
+          ];
+
+    // 🌟 DEFINIMOS LOS BOTONES DINÁMICAMENTE
+    final List<BottomNavigationBarItem> navItems = _userRole == 'provider'
+        ? const [
+            BottomNavigationBarItem(icon: Icon(Icons.dashboard), label: 'Panel'),
+            BottomNavigationBarItem(icon: Icon(Icons.local_activity), label: 'Mis Exp.'),
+            BottomNavigationBarItem(icon: Icon(Icons.list_alt), label: 'Reservas'),
+            BottomNavigationBarItem(icon: Icon(Icons.chat_bubble_outline), label: 'Mensajes'),
+            BottomNavigationBarItem(icon: Icon(Icons.person_outline), label: 'Perfil'),
+          ]
+        : const [
+            BottomNavigationBarItem(icon: Icon(Icons.search), label: 'Explora'),
+            BottomNavigationBarItem(icon: Icon(Icons.favorite_border), label: 'Favoritos'),
+            BottomNavigationBarItem(icon: Icon(Icons.confirmation_number_outlined), label: 'Reservas'),
+            BottomNavigationBarItem(icon: Icon(Icons.chat_bubble_outline), label: 'Mensajes'),
+            BottomNavigationBarItem(icon: Icon(Icons.person_outline), label: 'Perfil'),
+          ];
 
     return Scaffold(
-      body: IndexedStack(
-        index: _currentIndex,
-        children: pages,
-      ),
+      body: IndexedStack(index: _currentIndex, children: pages),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
-        onTap: (index) {
-          _checkAuthStatus();
-          setState(() {
-            _currentIndex = index;
-          });
-        },
+        onTap: (index) => setState(() => _currentIndex = index),
         type: BottomNavigationBarType.fixed,
+        items: navItems,
         selectedItemColor: Theme.of(context).colorScheme.primary,
         unselectedItemColor: Colors.grey[600],
-        selectedFontSize: 12,
-        unselectedFontSize: 12,
-        items: const [
-          BottomNavigationBarItem(
-            icon: Icon(Icons.search),
-            label: 'Explora',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.favorite_border),
-            activeIcon: Icon(Icons.favorite, color: Colors.red),
-            label: 'Favoritos',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.confirmation_number_outlined),
-            label: 'Reservas',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.chat_bubble_outline),
-            label: 'Mensajes',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.person_outline),
-            label: 'Perfil',
-          ),
-        ],
       ),
     );
   }
@@ -204,7 +207,6 @@ class _ExploreTabState extends State<ExploreTab> {
 
   Future<void> _fetchData() async {
     try {
-      // ⏱️ Timeout de 5 segundos para evitar bloqueos
       _dio.options.connectTimeout = const Duration(seconds: 5);
       _dio.options.receiveTimeout = const Duration(seconds: 5);
 
@@ -246,7 +248,7 @@ class _ExploreTabState extends State<ExploreTab> {
         setState(() => _loading = false);
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('No se pudo conectar con el servidor local.'),
+            content: Text('No se pudo conectar con el servidor.'),
             backgroundColor: Colors.red,
           ),
         );
@@ -497,10 +499,6 @@ class FavoritesTab extends StatelessWidget {
 }
 
 // -----------------------------------------------------------------
-// PESTAÑA 3: RESERVACIONES
-// -----------------------------------------------------------------
-
-// -----------------------------------------------------------------
 // PESTAÑA 3: RESERVACIONES (CONECTADA A LA API)
 // -----------------------------------------------------------------
 class ReservationsTab extends StatefulWidget {
@@ -717,7 +715,7 @@ class ProfileTab extends StatelessWidget {
           children: [
             const CircleAvatar(radius: 50, child: Icon(Icons.person, size: 60)),
             const SizedBox(height: 16),
-            const Text('Turista Vivra', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+            const Text('Usuario Vivra', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
             const Text('Sesión Activa', style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold)),
             const Spacer(),
@@ -739,7 +737,7 @@ class ProfileTab extends StatelessWidget {
 // -----------------------------------------------------------------
 class LoginTab extends StatefulWidget {
   final String baseUrl;
-  final Function(String) onLoginSuccess;
+  final Function(String, String) onLoginSuccess; 
 
   const LoginTab({super.key, required this.baseUrl, required this.onLoginSuccess});
 
@@ -752,7 +750,7 @@ class _LoginTabState extends State<LoginTab> {
   final _passwordController = TextEditingController();
   final _dio = Dio();
   bool _isLoading = false;
-  bool _obscurePassword = true; // 👁️ Nueva variable para controlar el ojito
+  bool _obscurePassword = true;
 
   Future<void> _login() async {
     if (_emailController.text.isEmpty || _passwordController.text.isEmpty) {
@@ -769,11 +767,11 @@ class _LoginTabState extends State<LoginTab> {
       );
 
       if (response.statusCode == 200) {
-        // Buscamos 'token' o 'access_token'
         String token = response.data['token'] ?? response.data['access_token'] ?? '';
+        String role = response.data['role'] ?? response.data['rol'] ?? 'tourist'; 
         
         if (token.isNotEmpty) {
-          widget.onLoginSuccess(token);
+          widget.onLoginSuccess(token, role); 
         } else {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Error: El servidor no envió el token'), backgroundColor: Colors.red)
@@ -799,13 +797,8 @@ class _LoginTabState extends State<LoginTab> {
             const SizedBox(height: 16),
             const Text('Accede a tu cuenta de Vivra', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             const SizedBox(height: 24),
-            TextField(
-              controller: _emailController, 
-              decoration: const InputDecoration(labelText: 'Correo', border: OutlineInputBorder())
-            ),
+            TextField(controller: _emailController, decoration: const InputDecoration(labelText: 'Correo', border: OutlineInputBorder())),
             const SizedBox(height: 16),
-            
-            // 👁️ Campo de contraseña actualizado con el ojito
             TextField(
               controller: _passwordController, 
               obscureText: _obscurePassword, 
@@ -813,20 +806,11 @@ class _LoginTabState extends State<LoginTab> {
                 labelText: 'Contraseña', 
                 border: const OutlineInputBorder(),
                 suffixIcon: IconButton(
-                  icon: Icon(
-                    _obscurePassword ? Icons.visibility_off : Icons.visibility,
-                    color: Colors.grey,
-                  ),
-                  onPressed: () {
-                    // Cambiamos el estado al presionar el botón
-                    setState(() {
-                      _obscurePassword = !_obscurePassword;
-                    });
-                  },
+                  icon: Icon(_obscurePassword ? Icons.visibility_off : Icons.visibility, color: Colors.grey),
+                  onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
                 ),
               )
             ),
-            
             const SizedBox(height: 24),
             _isLoading
                 ? const CircularProgressIndicator()
@@ -866,12 +850,11 @@ class _ExperienceDetailScreenState extends State<ExperienceDetailScreen> {
   int _quantity = 1;
   bool _isLoadingSchedules = false;
 
-  // Función para abrir el calendario
   Future<void> _pickDate() async {
     final DateTime? picked = await showDatePicker(
       context: context,
       initialDate: DateTime.now().add(const Duration(days: 1)),
-      firstDate: DateTime.now(), // No se puede reservar en el pasado
+      firstDate: DateTime.now(), 
       lastDate: DateTime.now().add(const Duration(days: 90)),
     );
 
@@ -879,11 +862,10 @@ class _ExperienceDetailScreenState extends State<ExperienceDetailScreen> {
       setState(() {
         _selectedDate = picked;
         _selectedScheduleId = null; 
-        _quantity = 1; // Reseteamos la cantidad por seguridad al cambiar de día
+        _quantity = 1; 
         _isLoadingSchedules = true;
       });
 
-      // Consultamos a Laravel por los horarios de esta experiencia
       int expId = int.tryParse(widget.experience['id'].toString()) ?? 0;
       final schedules = await TouristService().getSchedules(expId);
 
@@ -896,7 +878,6 @@ class _ExperienceDetailScreenState extends State<ExperienceDetailScreen> {
     }
   }
 
-  // Calculadora de precio dinámico (A prueba de decimales)
   int _calculateTotalPrice() {
     String priceStr = widget.experience['price']?.toString() ?? widget.experience['precio']?.toString() ?? '0';
     String extraPriceStr = widget.experience['extra_person_price']?.toString() ?? '0';
@@ -916,8 +897,7 @@ class _ExperienceDetailScreenState extends State<ExperienceDetailScreen> {
     String desc = widget.experience['description'] ?? widget.experience['descripcion'] ?? 'Sin descripción';
     int totalPrice = _calculateTotalPrice();
 
-    // 🌟 NUEVO: Calculamos el stock máximo del horario seleccionado
-    int maxStock = 99; // Límite alto por defecto si no ha elegido hora
+    int maxStock = 99; 
     if (_selectedScheduleId != null) {
       final schedule = _availableSchedules.firstWhere(
         (s) => s['id'] == _selectedScheduleId, 
@@ -944,7 +924,6 @@ class _ExperienceDetailScreenState extends State<ExperienceDetailScreen> {
             Text(desc, style: const TextStyle(fontSize: 15)),
             const Divider(height: 40),
 
-            // 1. Selector de Fecha
             const Text('1. Elige una fecha:', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
             OutlinedButton.icon(
@@ -956,7 +935,6 @@ class _ExperienceDetailScreenState extends State<ExperienceDetailScreen> {
             ),
             const SizedBox(height: 20),
 
-            // 2. Selector de Horarios (Chips)
             if (_selectedDate != null) ...[
               const Text('2. Horarios disponibles:', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
               const SizedBox(height: 8),
@@ -977,7 +955,6 @@ class _ExperienceDetailScreenState extends State<ExperienceDetailScreen> {
                                 setState(() {
                                   _selectedScheduleId = selected ? schedule['id'] : null;
                                   
-                                  // 🌟 NUEVO: Auto-corregir la cantidad si excede el nuevo horario
                                   if (selected) {
                                     int scheduleStock = int.tryParse(schedule['stock'].toString()) ?? 99;
                                     if (_quantity > scheduleStock) {
@@ -999,7 +976,6 @@ class _ExperienceDetailScreenState extends State<ExperienceDetailScreen> {
               const SizedBox(height: 20),
             ],
 
-            // 3. Contador de Personas
             const Text('3. ¿Cuántos asisten?', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
             Row(
@@ -1009,7 +985,6 @@ class _ExperienceDetailScreenState extends State<ExperienceDetailScreen> {
                   icon: Icon(Icons.remove_circle_outline, size: 30, color: _quantity > 1 ? Colors.black : Colors.grey),
                 ),
                 Text('$_quantity', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-                // 🌟 NUEVO: Freno visual en el botón de agregar
                 IconButton(
                   onPressed: _quantity < maxStock ? () => setState(() => _quantity++) : null,
                   icon: Icon(
@@ -1027,7 +1002,6 @@ class _ExperienceDetailScreenState extends State<ExperienceDetailScreen> {
             ),
             const SizedBox(height: 32),
 
-            // Resumen y Botón de compra
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(color: Colors.grey[200], borderRadius: BorderRadius.circular(10)),
@@ -1057,7 +1031,6 @@ class _ExperienceDetailScreenState extends State<ExperienceDetailScreen> {
                   return;
                 }
                 
-                // 🌟 NUEVO: Última barrera de seguridad antes de pasar a la pantalla de pago
                 if (_quantity > maxStock) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(content: Text('Solo quedan $maxStock lugares disponibles.'), backgroundColor: Colors.red)
@@ -1116,15 +1089,11 @@ class PaymentScreen extends StatefulWidget {
 class _PaymentScreenState extends State<PaymentScreen> {
   String _paymentMethod = 'tarjeta'; 
   bool _isProcessing = false;
-  
-  // Llave global para controlar las validaciones del formulario
   final _formKey = GlobalKey<FormState>();
 
   void _processPayment() async {
-    // Si el usuario eligió tarjeta, primero validamos el formulario
     if (_paymentMethod == 'tarjeta') {
       if (!_formKey.currentState!.validate()) {
-        // Si hay errores (faltan datos, formato incorrecto), detenemos el pago
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Por favor revisa los datos de tu tarjeta.'), backgroundColor: Colors.orange),
         );
@@ -1134,13 +1103,11 @@ class _PaymentScreenState extends State<PaymentScreen> {
 
     setState(() => _isProcessing = true);
 
-    // Simulamos validación bancaria
     await Future.delayed(const Duration(seconds: 2));
 
     final service = TouristService();
     int expId = int.tryParse(widget.experience['id'].toString()) ?? 0;
     
-    // Enviamos los datos completos al backend
     bool success = await service.buyExperience(expId, widget.scheduleId, widget.bookingDate, widget.quantity);
 
     setState(() => _isProcessing = false);
@@ -1161,9 +1128,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
     }
   }
 
-  // Generador de código de barras realista (sin paquetes externos)
   Widget _buildRealisticBarcode() {
-    // Patrón de grosores simulando un código real
     final widths = [3.0, 1.0, 4.0, 2.0, 1.0, 5.0, 2.0, 1.0, 3.0, 4.0, 1.0, 2.0];
     
     return Container(
@@ -1184,7 +1149,6 @@ class _PaymentScreenState extends State<PaymentScreen> {
         children: [
           const Text('REFERENCIA DE PAGO', style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold, letterSpacing: 1.5)),
           const SizedBox(height: 16),
-          // Dibujamos las barras iterando la lista de grosores
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: List.generate(28, (index) {
@@ -1197,7 +1161,6 @@ class _PaymentScreenState extends State<PaymentScreen> {
             }),
           ),
           const SizedBox(height: 16),
-          // Número de referencia espaciado tipo ticket
           const Text(
             '9876  5432  1098  7654', 
             style: TextStyle(fontSize: 18, letterSpacing: 2, fontFamily: 'monospace', fontWeight: FontWeight.bold),
@@ -1262,7 +1225,6 @@ class _PaymentScreenState extends State<PaymentScreen> {
             const Divider(),
             const SizedBox(height: 16),
 
-            // Formulario de Tarjeta con Validaciones
             if (_paymentMethod == 'tarjeta') 
               Form(
                 key: _formKey,
@@ -1271,7 +1233,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
                     TextFormField(
                       decoration: const InputDecoration(labelText: 'Número de Tarjeta', border: OutlineInputBorder(), prefixIcon: Icon(Icons.credit_card)),
                       keyboardType: TextInputType.number,
-                      maxLength: 16, // Limita visualmente a 16 dígitos
+                      maxLength: 16, 
                       validator: (value) {
                         if (value == null || value.isEmpty) return 'El número es requerido';
                         if (value.length < 16) return 'Debe tener 16 dígitos';
@@ -1281,7 +1243,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
                     ),
                     const SizedBox(height: 8),
                     Row(
-                      crossAxisAlignment: CrossAxisAlignment.start, // Para que el error no descuadre la fila
+                      crossAxisAlignment: CrossAxisAlignment.start, 
                       children: [
                         Expanded(
                           child: TextFormField(
@@ -1289,7 +1251,6 @@ class _PaymentScreenState extends State<PaymentScreen> {
                             maxLength: 5,
                             validator: (value) {
                               if (value == null || value.isEmpty) return 'Requerido';
-                              // Expresión regular que obliga a poner Mes (01-12) / Año (2 dígitos)
                               if (!RegExp(r'^(0[1-9]|1[0-2])\/\d{2}$').hasMatch(value)) {
                                 return 'Formato incorrecto';
                               }
@@ -1332,7 +1293,6 @@ class _PaymentScreenState extends State<PaymentScreen> {
                   children: [
                     const Text('Presenta este ticket en las cajas de cualquier tienda afiliada (OXXO, 7-Eleven, Farmacias del Ahorro) para pagar tu reserva.', textAlign: TextAlign.center),
                     const SizedBox(height: 20),
-                    // Nuestro nuevo código de barras super realista
                     _buildRealisticBarcode(),
                   ],
                 ),
@@ -1340,7 +1300,6 @@ class _PaymentScreenState extends State<PaymentScreen> {
 
             const SizedBox(height: 32),
             
-            // Botón de Pagar
             _isProcessing
                 ? const Center(child: CircularProgressIndicator())
                 : ElevatedButton(
@@ -1370,11 +1329,9 @@ class ReservationDetailScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Extraemos las cajas de información para no escribir tanto
     final experience = reserva['experience'] ?? {};
     final schedule = reserva['schedule'] ?? {};
     
-    // Asignamos las variables de forma segura
     String title = experience['name'] ?? experience['titulo'] ?? 'Experiencia';
     String location = experience['location'] ?? 'Ubicación no especificada';
     String date = reserva['booking_date'] ?? 'Pendiente';
@@ -1395,7 +1352,6 @@ class ReservationDetailScreen extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // 1. Imagen de la Experiencia
             if (imageUrl.isNotEmpty)
               ClipRRect(
                 borderRadius: BorderRadius.circular(16),
@@ -1412,7 +1368,6 @@ class ReservationDetailScreen extends StatelessWidget {
             
             const SizedBox(height: 24),
             
-            // 2. Título y Etiqueta de Estado
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1438,7 +1393,6 @@ class ReservationDetailScreen extends StatelessWidget {
             ),
             const SizedBox(height: 24),
 
-            // 3. Tarjeta de Logística (Fecha, Hora, Personas, Lugar)
             const Text('Información del evento', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
             Card(
@@ -1461,7 +1415,6 @@ class ReservationDetailScreen extends StatelessWidget {
             ),
             const SizedBox(height: 24),
 
-            // 4. Resumen de Pago
             const Text('Resumen de Pago', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
             Container(
@@ -1484,7 +1437,6 @@ class ReservationDetailScreen extends StatelessWidget {
             
             const SizedBox(height: 32),
             
-            // 5. Botón de Ayuda
             OutlinedButton.icon(
               onPressed: () {
                 ScaffoldMessenger.of(context).showSnackBar(
@@ -1504,7 +1456,6 @@ class ReservationDetailScreen extends StatelessWidget {
     );
   }
 
-  // Componente auxiliar para pintar una imagen vacía si no tiene foto
   Widget _buildPlaceholderImage(BuildContext context) {
     return Container(
       height: 200,
@@ -1517,7 +1468,6 @@ class ReservationDetailScreen extends StatelessWidget {
     );
   }
 
-  // Componente auxiliar para crear las filas con íconos de la tarjeta logística
   Widget _buildDetailRow(IconData icon, String label, String value) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8.0),
@@ -1536,6 +1486,489 @@ class ReservationDetailScreen extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// =================================================================
+// MÓDULO DEL PRESTADOR DE SERVICIOS (PLANTILLAS)
+// =================================================================
+
+class ProviderDashboardTab extends StatelessWidget {
+  const ProviderDashboardTab({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return const Center(child: Text('Panel de Inicio del Prestador (Próximamente)', style: TextStyle(fontSize: 18)));
+  }
+}
+
+// =================================================================
+// MÓDULO DEL PRESTADOR DE SERVICIOS
+// =================================================================
+
+  class ProviderExperiencesTab extends StatefulWidget {
+    const ProviderExperiencesTab({super.key});
+
+    @override
+    State<ProviderExperiencesTab> createState() => _ProviderExperiencesTabState();
+  }
+
+class _ProviderExperiencesTabState extends State<ProviderExperiencesTab> {
+  final Dio _dio = Dio();
+  final _storage = const FlutterSecureStorage();
+  List<dynamic> _misExperiencias = [];
+  bool _loading = true;
+  
+  final String _baseUrl = 'https://vivra-915z.onrender.com/api'; 
+  int? _myUserId;
+  String? _myToken;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchMisExperiencias();
+  }
+
+Future<void> _fetchMisExperiencias() async {
+    setState(() => _loading = true);
+    try {
+      String? token = await _storage.read(key: 'auth_token');
+      
+      final userResponse = await _dio.get(
+        '$_baseUrl/user',
+        options: Options(headers: {'Authorization': 'Bearer $token'}, receiveTimeout: const Duration(seconds: 5)),
+      );
+      
+      final int myUserId = userResponse.data['id'];
+
+      // Guardamos el ID y el Token en el estado de la clase para pasárselos al formulario
+      _myUserId = myUserId;
+      _myToken = token;
+
+      final expResponse = await _dio.get('$_baseUrl/experiencias');
+
+      if (expResponse.statusCode == 200) {
+        dynamic data = expResponse.data;
+        List<dynamic> allExperiences = (data is List) ? data : (data['data'] ?? []);
+
+        if (mounted) {
+          setState(() {
+            _misExperiencias = allExperiences.where((exp) {
+              int brandId = int.tryParse(exp['brand_id']?.toString() ?? '0') ?? 0;
+              return brandId == myUserId;
+            }).toList();
+            _loading = false;
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('Error cargando mis experiencias: $e');
+      if (mounted) {
+        setState(() => _loading = false);
+      }
+    }
+  }
+
+  void _confirmDelete(int id) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('¿Borrar experiencia?'),
+        content: const Text('Esta acción no se puede deshacer.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Borrando experiencia #$id... (En desarrollo)'), backgroundColor: Colors.red));
+            }, 
+            child: const Text('Borrar', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Tus Experiencias'),
+        backgroundColor: Theme.of(context).colorScheme.primary,
+        foregroundColor: Colors.white,
+      ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : _misExperiencias.isEmpty
+              ? Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.local_activity, size: 80, color: Colors.grey),
+                      const SizedBox(height: 16),
+                      const Text('No tienes experiencias publicadas aún.', style: TextStyle(fontSize: 16, color: Colors.grey)),
+                      const SizedBox(height: 24),
+                      ElevatedButton.icon(
+                        onPressed: () async {
+                          if (_myUserId != null && _myToken != null) {
+                            final result = await Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => CreateExperienceScreen(
+                                  brandId: _myUserId!,
+                                  baseUrl: _baseUrl,
+                                  token: _myToken!,
+                                ),
+                              ),
+                            );
+
+                            if (result == true) {
+                              _fetchMisExperiencias();
+                            }
+                          }
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Theme.of(context).colorScheme.primary,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                        ),
+                        icon: const Icon(Icons.add),
+                        label: const Text('Crear mi primera experiencia'),
+                      )
+                    ],
+                  ),
+                )
+              : RefreshIndicator(
+                  onRefresh: _fetchMisExperiencias,
+                  child: ListView.builder(
+                    padding: const EdgeInsets.all(16),
+                    itemCount: _misExperiencias.length,
+                    itemBuilder: (context, index) {
+                      final exp = _misExperiencias[index];
+                      String title = exp['name'] ?? exp['titulo'] ?? 'Sin título';
+                      String price = exp['price']?.toString() ?? exp['precio']?.toString() ?? '0';
+                      String? imageUrl = exp['image'] ?? exp['imagen'];
+                      bool isActive = exp['active'] == 1 || exp['active'] == true || exp['active'] == '1';
+
+                      return Card(
+                        margin: const EdgeInsets.only(bottom: 16),
+                        elevation: 3,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        child: Column(
+                          children: [
+                            ClipRRect(
+                              borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+                              child: imageUrl != null && imageUrl.isNotEmpty
+                                  ? Image.network(
+                                      imageUrl, 
+                                      height: 140, 
+                                      width: double.infinity, 
+                                      fit: BoxFit.cover,
+                                      errorBuilder: (_,__,___) => _buildPlaceholderImage(context)
+                                    )
+                                  : _buildPlaceholderImage(context),
+                            ),
+                            Padding(
+                              padding: const EdgeInsets.all(16.0),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                                        const SizedBox(height: 4),
+                                        Text('\$$price MXN / persona', style: const TextStyle(fontSize: 15, color: Colors.green, fontWeight: FontWeight.bold)),
+                                        const SizedBox(height: 8),
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                          decoration: BoxDecoration(
+                                            color: isActive ? Colors.green[100] : Colors.red[100],
+                                            borderRadius: BorderRadius.circular(8),
+                                          ),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Icon(Icons.circle, size: 10, color: isActive ? Colors.green[700] : Colors.red[700]),
+                                              const SizedBox(width: 6),
+                                              Text(isActive ? 'Activa' : 'Inactiva', style: TextStyle(color: isActive ? Colors.green[800] : Colors.red[800], fontSize: 12, fontWeight: FontWeight.bold)),
+                                            ],
+                                          ),
+                                        )
+                                      ],
+                                    ),
+                                  ),
+                                  Column(
+                                    children: [
+                                      IconButton(
+                                        icon: const Icon(Icons.edit, color: Colors.blue),
+                                        tooltip: 'Editar',
+                                        onPressed: () {
+                                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Abriendo editor... (En desarrollo)')));
+                                        },
+                                      ),
+                                      IconButton(
+                                        icon: const Icon(Icons.delete_outline, color: Colors.red),
+                                        tooltip: 'Borrar',
+                                        onPressed: () => _confirmDelete(exp['id'] ?? 0),
+                                      ),
+                                    ],
+                                  )
+                                ],
+                              ),
+                            )
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ),
+      floatingActionButton: _misExperiencias.isNotEmpty 
+        ? FloatingActionButton.extended(
+            backgroundColor: Theme.of(context).colorScheme.primary,
+            foregroundColor: Colors.white,
+            onPressed: () async {
+              if (_myUserId != null && _myToken != null) {
+                final result = await Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => CreateExperienceScreen(
+                      brandId: _myUserId!,
+                      baseUrl: _baseUrl,
+                      token: _myToken!,
+                    ),
+                  ),
+                );
+
+                if (result == true) {
+                  _fetchMisExperiencias();
+                }
+              }
+            },
+            icon: const Icon(Icons.add),
+            label: const Text('Nueva'),
+          )
+        : null,
+    );
+  }
+
+  Widget _buildPlaceholderImage(BuildContext context) {
+    return Container(
+      height: 140,
+      width: double.infinity,
+      color: Theme.of(context).colorScheme.primary.withOpacity(0.1),
+      child: Icon(Icons.landscape, size: 60, color: Theme.of(context).colorScheme.primary),
+    );
+  }
+}
+
+class ProviderReservationsTab extends StatelessWidget {
+  const ProviderReservationsTab({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return const Center(child: Text('Monitor de Reservaciones (Próximamente)', style: TextStyle(fontSize: 18)));
+  }
+}
+
+// -----------------------------------------------------------------
+// PANTALLA PARA CREAR UNA NUEVA EXPERIENCIA (PRESTADOR)
+// -----------------------------------------------------------------
+class CreateExperienceScreen extends StatefulWidget {
+  final int brandId;
+  final String baseUrl;
+  final String token;
+
+  const CreateExperienceScreen({
+    super.key,
+    required this.brandId,
+    required this.baseUrl,
+    required this.token,
+  });
+
+  @override
+  State<CreateExperienceScreen> createState() => _CreateExperienceScreenState();
+}
+
+class _CreateExperienceScreenState extends State<CreateExperienceScreen> {
+  final _formKey = GlobalKey<FormState>();
+  final _dio = Dio();
+  bool _isSaving = false;
+
+  // Controladores para los campos de texto
+  final _titleController = TextEditingController();
+  final _descController = TextEditingController();
+  final _priceController = TextEditingController();
+  final _locationController = TextEditingController();
+  final _includedPersonsController = TextEditingController(text: '1');
+  final _extraPriceController = TextEditingController(text: '0');
+  final _imageUrlController = TextEditingController();
+
+  // Categoría por defecto (Asumiendo 1=Gastronomía, 2=Artesanías, 3=Aventura)
+  int _selectedCategoryId = 1;
+
+  Future<void> _saveExperience() async {
+    if (!_formKey.currentState!.validate()) return;
+
+    setState(() => _isSaving = true);
+
+    try {
+      // Preparamos los datos para que coincidan con tu tabla 'articles'
+      final payload = {
+        'name': _titleController.text.trim(),
+        'description': _descController.text.trim(),
+        'price': double.tryParse(_priceController.text) ?? 0,
+        'location': _locationController.text.trim(),
+        'included_persons': int.tryParse(_includedPersonsController.text) ?? 1,
+        'extra_person_price': double.tryParse(_extraPriceController.text) ?? 0,
+        'image': _imageUrlController.text.trim(),
+        'brand_id': widget.brandId,
+        'category_id': _selectedCategoryId,
+        'active': 1, // Por defecto la creamos activa
+      };
+
+      // Hacemos el POST a la API
+      final response = await _dio.post(
+        '${widget.baseUrl}/articles', 
+        data: payload,
+        options: Options(
+          headers: {
+            'Authorization': 'Bearer ${widget.token}',
+            'Accept': 'application/json',
+          },
+        ),
+      );
+
+      if (response.statusCode == 201 || response.statusCode == 200) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('¡Experiencia creada con éxito! 🎉'), backgroundColor: Colors.green),
+          );
+          Navigator.pop(context, true); // Regresamos y mandamos 'true' para indicar éxito
+        }
+      }
+    } catch (e) {
+      debugPrint('Error guardando la experiencia: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Error al guardar. Revisa tu conexión o la API.'), backgroundColor: Colors.red),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Nueva Experiencia'),
+        backgroundColor: Theme.of(context).colorScheme.primary,
+        foregroundColor: Colors.white,
+      ),
+      body: Form(
+        key: _formKey,
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Información General', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _titleController,
+                decoration: const InputDecoration(labelText: 'Título del tour o clase', border: OutlineInputBorder()),
+                validator: (v) => v!.isEmpty ? 'Requerido' : null,
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _descController,
+                decoration: const InputDecoration(labelText: 'Descripción detallada', border: OutlineInputBorder()),
+                maxLines: 3,
+                validator: (v) => v!.isEmpty ? 'Requerido' : null,
+              ),
+              const SizedBox(height: 16),
+              DropdownButtonFormField<int>(
+                value: _selectedCategoryId,
+                decoration: const InputDecoration(labelText: 'Categoría', border: OutlineInputBorder()),
+                items: const [
+                  DropdownMenuItem(value: 1, child: Text('Gastronomía')),
+                  DropdownMenuItem(value: 2, child: Text('Artesanías')),
+                  DropdownMenuItem(value: 3, child: Text('Aventura')),
+                ],
+                onChanged: (value) => setState(() => _selectedCategoryId = value!),
+              ),
+              const Divider(height: 48),
+
+              const Text('Precios y Logística', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextFormField(
+                      controller: _priceController,
+                      decoration: const InputDecoration(labelText: 'Precio Base (\$)', border: OutlineInputBorder(), prefixText: '\$ '),
+                      keyboardType: TextInputType.number,
+                      validator: (v) => v!.isEmpty ? 'Requerido' : null,
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: TextFormField(
+                      controller: _includedPersonsController,
+                      decoration: const InputDecoration(labelText: 'Personas incluidas', border: OutlineInputBorder()),
+                      keyboardType: TextInputType.number,
+                      validator: (v) => v!.isEmpty ? 'Requerido' : null,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextFormField(
+                      controller: _extraPriceController,
+                      decoration: const InputDecoration(labelText: 'Precio P. Extra (\$)', border: OutlineInputBorder(), prefixText: '\$ '),
+                      keyboardType: TextInputType.number,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _locationController,
+                decoration: const InputDecoration(labelText: 'Ubicación / Punto de encuentro', border: OutlineInputBorder(), prefixIcon: Icon(Icons.location_on)),
+                validator: (v) => v!.isEmpty ? 'Requerido' : null,
+              ),
+              const Divider(height: 48),
+
+              const Text('Multimedia', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _imageUrlController,
+                decoration: const InputDecoration(labelText: 'URL de la imagen (Opcional)', border: OutlineInputBorder(), prefixIcon: Icon(Icons.image)),
+              ),
+              const SizedBox(height: 32),
+
+              _isSaving
+                  ? const Center(child: CircularProgressIndicator())
+                  : ElevatedButton(
+                      onPressed: _saveExperience,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.green,
+                        foregroundColor: Colors.white,
+                        minimumSize: const Size.fromHeight(55),
+                      ),
+                      child: const Text('Publicar Experiencia', style: TextStyle(fontSize: 18)),
+                    ),
+            ],
+          ),
+        ),
       ),
     );
   }
