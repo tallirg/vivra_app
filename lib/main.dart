@@ -660,7 +660,7 @@ class _ReservationsTabState extends State<ReservationsTab> {
 // -----------------------------------------------------------------
 // PESTAÑA 4: MENSAJES (ESTRUCTURA DE DOS PESTAÑAS: IA + PRESTADORES)
 // -----------------------------------------------------------------
-class MessagesTab extends StatelessWidget {
+class MessagesTab extends StatefulWidget {
   final bool isLoggedIn;
   final VoidCallback onGoToLogin;
 
@@ -671,8 +671,35 @@ class MessagesTab extends StatelessWidget {
   });
 
   @override
+  State<MessagesTab> createState() => _MessagesTabState();
+}
+
+class _MessagesTabState extends State<MessagesTab> {
+  final _storage = const FlutterSecureStorage();
+  String _userRole = 'turista';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadUserRole();
+  }
+
+  Future<void> _loadUserRole() async {
+    // Intenta leer el rol desde varias claves comunes por seguridad
+    String? role = await _storage.read(key: 'user_role') 
+                ?? await _storage.read(key: 'role') 
+                ?? await _storage.read(key: 'type');
+
+    if (role != null && mounted) {
+      setState(() {
+        _userRole = role.toLowerCase().trim();
+      });
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    if (!isLoggedIn) {
+    if (!widget.isLoggedIn) {
       return Scaffold(
         appBar: AppBar(
           title: const Text('Mensajes'),
@@ -688,13 +715,13 @@ class MessagesTab extends StatelessWidget {
                 const Icon(Icons.chat_bubble_outline, size: 80, color: Colors.grey),
                 const SizedBox(height: 16),
                 const Text(
-                  'Inicia sesión para conversar con el asistente virtual o con los prestadores.',
+                  'Inicia sesión para conversar con el asistente virtual o tus contactos.',
                   textAlign: TextAlign.center,
                   style: TextStyle(fontSize: 16),
                 ),
                 const SizedBox(height: 20),
                 ElevatedButton(
-                  onPressed: onGoToLogin,
+                  onPressed: widget.onGoToLogin,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Theme.of(context).colorScheme.primary,
                     foregroundColor: Colors.white,
@@ -708,6 +735,9 @@ class MessagesTab extends StatelessWidget {
       );
     }
 
+    bool isPrestador = _userRole == 'prestador' || _userRole == 'provider' || _userRole == 'anfitrion';
+    String contactTabTitle = isPrestador ? 'Turistas' : 'Prestadores';
+
     return DefaultTabController(
       length: 2,
       child: Scaffold(
@@ -715,26 +745,20 @@ class MessagesTab extends StatelessWidget {
           title: const Text('Mensajes'),
           backgroundColor: Theme.of(context).colorScheme.primary,
           foregroundColor: Colors.white,
-          bottom: const TabBar(
+          bottom: TabBar(
             indicatorColor: Colors.white,
             labelColor: Colors.white,
             unselectedLabelColor: Colors.white70,
             tabs: [
-              Tab(icon: Icon(Icons.smart_toy_outlined), text: 'Asistente IA'),
-              Tab(icon: Icon(Icons.people_outline), text: 'Prestadores'),
+              const Tab(icon: Icon(Icons.smart_toy_outlined), text: 'Asistente IA'),
+              Tab(icon: const Icon(Icons.people_outline), text: contactTabTitle),
             ],
           ),
         ),
-        body: const TabBarView(
+        body: TabBarView(
           children: [
-            AiChatSubTab(),
-            ChatListSubTab(),
-            Center(
-              child: Text(
-                'Tus conversaciones con prestadores aparecerán aquí',
-                style: TextStyle(color: Colors.grey, fontSize: 16),
-              ),
-            ),
+            const AiChatSubTab(),
+            ChatListSubTab(userRole: _userRole),
           ],
         ),
       ),
@@ -949,10 +973,11 @@ class _AiChatSubTabState extends State<AiChatSubTab> {
 }
 
 // =================================================================
-// 2. LISTA DE CONVERSACIONES ACTIVAS (USUARIOS Y PRESTADORES)
+// 2. LISTA DE CONVERSACIONES ACTIVAS Y NUEVO CHAT
 // =================================================================
 class ChatListSubTab extends StatefulWidget {
-  const ChatListSubTab({super.key});
+  final String userRole;
+  const ChatListSubTab({super.key, required this.userRole});
 
   @override
   State<ChatListSubTab> createState() => _ChatListSubTabState();
@@ -976,20 +1001,19 @@ class _ChatListSubTabState extends State<ChatListSubTab> {
     try {
       String? token = await _storage.read(key: 'auth_token');
       
-      // ⚠️ ADVERTENCIA: Esta ruta aún no existe en el api.php del backend.
-      // Cuando tu compañera la agregue, los chats cargarán automáticamente.
       final response = await _dio.get(
         '$_baseUrl/conversations', 
-        options: Options(headers: {'Authorization': 'Bearer $token', 'Accept': 'application/json'})
+        options: Options(headers: {
+          'Authorization': 'Bearer $token', 
+          'Accept': 'application/json'
+        })
       );
 
-      if (response.statusCode == 200) {
-        if (mounted) {
-          setState(() {
-            _conversations = response.data is List ? response.data : (response.data['data'] ?? []);
-            _loading = false;
-          });
-        }
+      if (response.statusCode == 200 && mounted) {
+        setState(() {
+          _conversations = response.data is List ? response.data : (response.data['data'] ?? []);
+          _loading = false;
+        });
       }
     } catch (e) {
       debugPrint('Error al cargar conversaciones: $e');
@@ -997,69 +1021,249 @@ class _ChatListSubTabState extends State<ChatListSubTab> {
     }
   }
 
+  void _showNewChatModal(BuildContext context) {
+    bool isPrestador = widget.userRole == 'prestador' || 
+                       widget.userRole == 'provider' || 
+                       widget.userRole == 'anfitrion';
+
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        return Container(
+          padding: const EdgeInsets.all(16),
+          height: 400,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                isPrestador ? 'Contactar Turista' : 'Contactar Prestador',
+                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                isPrestador 
+                  ? 'Selecciona un turista con reservación activa:' 
+                  : 'Selecciona el anfitrión de una de tus reservaciones:',
+                style: const TextStyle(color: Colors.grey),
+              ),
+              const Divider(height: 24),
+              Expanded(
+                child: FutureBuilder<List<dynamic>>(
+                  future: _fetchContactsForNewChat(isPrestador),
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+                    if (!snapshot.hasData || snapshot.data!.isEmpty) {
+                      return const Center(
+                        child: Text('No tienes reservaciones activas para iniciar chat.'),
+                      );
+                    }
+
+                    List bookings = snapshot.data!;
+                    return ListView.builder(
+                      itemCount: bookings.length,
+                      itemBuilder: (context, index) {
+                        var booking = bookings[index];
+
+                        String contactName = 'Usuario';
+                        dynamic receiverId;
+
+                        if (isPrestador) {
+                          // Prestador buscando al Turista/Cliente
+                          contactName = booking['user']?['name'] 
+                              ?? booking['user']?['nombre'] 
+                              ?? booking['tourist_name'] 
+                              ?? 'Turista';
+                          
+                          receiverId = booking['user_id'] 
+                              ?? booking['user']?['id'] 
+                              ?? booking['tourist_id'];
+                        } else {
+                          // Turista buscando al Prestador/Anfitrión
+                          contactName = booking['experience']?['user']?['name'] 
+                              ?? booking['experience']?['user']?['nombre'] 
+                              ?? booking['provider']?['name'] 
+                              ?? booking['provider_name'] 
+                              ?? 'Prestador';
+
+                          receiverId = booking['experience']?['user_id'] 
+                              ?? booking['experience']?['user']?['id'] 
+                              ?? booking['provider_id'];
+                        }
+
+                        // Obtener nombre de la experiencia
+                        String expTitle = booking['experience']?['title'] 
+                            ?? booking['experience']?['nombre'] 
+                            ?? booking['experience']?['name'] 
+                            ?? booking['experience_title'] 
+                            ?? booking['title'] 
+                            ?? 'Experiencia reservada';
+
+                        return ListTile(
+                          leading: CircleAvatar(
+                            backgroundColor: Theme.of(context).colorScheme.primary.withOpacity(0.15),
+                            child: const Icon(Icons.person, color: Colors.black87),
+                          ),
+                          title: Text(contactName, style: const TextStyle(fontWeight: FontWeight.w600)),
+                          subtitle: Text(expTitle, style: const TextStyle(fontSize: 13, color: Colors.grey)),
+                          trailing: const Icon(Icons.chat_bubble_outline, color: Colors.orange),
+                          onTap: () async {
+                            Navigator.pop(context); // Cerrar bottom sheet
+                            String? token = await _storage.read(key: 'auth_token');
+                            
+                            if (mounted && token != null) {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => ChatScreen(
+                                    receiverName: contactName,
+                                    receiverId: receiverId, // ID necesario para enviar mensaje
+                                    token: token,
+                                    baseUrl: _baseUrl,
+                                  ),
+                                ),
+                              ).then((_) => _fetchConversations());
+                            }
+                          },
+                        );
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<List<dynamic>> _fetchContactsForNewChat(bool isPrestador) async {
+    try {
+      String? token = await _storage.read(key: 'auth_token');
+      
+      // Endpoints diferenciados por rol
+      String endpoint = isPrestador 
+          ? '$_baseUrl/provider/reservaciones' 
+          : '$_baseUrl/reservaciones'; // Si en tu API de turistas usas /bookings cambia esta ruta
+
+      final response = await _dio.get(
+        endpoint, 
+        options: Options(headers: {
+          'Authorization': 'Bearer $token',
+          'Accept': 'application/json',
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        dynamic data = response.data;
+        if (data is List) return data;
+        if (data is Map) {
+          return data['data'] ?? data['reservaciones'] ?? data['bookings'] ?? [];
+        }
+      }
+      return [];
+    } catch (e) {
+      debugPrint('Error obteniendo contactos para chat: $e');
+      return [];
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    bool isPrestador = widget.userRole == 'prestador' || 
+                       widget.userRole == 'provider' || 
+                       widget.userRole == 'anfitrion';
+
     if (_loading) {
       return const Center(child: CircularProgressIndicator());
     }
 
+    Widget content;
+
     if (_conversations.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+      content = RefreshIndicator(
+        onRefresh: _fetchConversations,
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
           children: [
-            Icon(Icons.speaker_notes_off, size: 80, color: Colors.grey[400]),
-            const SizedBox(height: 16),
-            const Text('No tienes conversaciones activas.', style: TextStyle(color: Colors.grey, fontSize: 16)),
-            const SizedBox(height: 16),
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 32.0),
-              child: Text(
-                '(Nota: El backend aún necesita las rutas de chat para procesar mensajes)', 
-                textAlign: TextAlign.center, 
-                style: TextStyle(color: Colors.redAccent, fontSize: 12)
+            SizedBox(height: MediaQuery.of(context).size.height * 0.2),
+            Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.speaker_notes_off, size: 80, color: Colors.grey[400]),
+                  const SizedBox(height: 16),
+                  Text(
+                    isPrestador 
+                      ? 'No tienes chats activos con turistas.' 
+                      : 'No tienes chats activos con prestadores.', 
+                    style: const TextStyle(color: Colors.grey, fontSize: 16),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Presiona el botón + para iniciar un mensaje',
+                    style: TextStyle(color: Colors.grey[500], fontSize: 13),
+                  ),
+                ],
               ),
             ),
           ],
         ),
       );
+    } else {
+      content = RefreshIndicator(
+        onRefresh: _fetchConversations,
+        child: ListView.builder(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          itemCount: _conversations.length,
+          itemBuilder: (context, index) {
+            final conv = _conversations[index];
+            String contactName = conv['contact_name'] ?? conv['name'] ?? 'Usuario';
+            String lastMessage = conv['last_message'] ?? '...';
+            dynamic receiverId = conv['contact_id'] ?? conv['user_id'];
+            
+            return ListTile(
+              leading: CircleAvatar(
+                backgroundColor: Theme.of(context).colorScheme.primary.withOpacity(0.2),
+                child: const Icon(Icons.person, color: Colors.black54),
+              ),
+              title: Text(contactName, style: const TextStyle(fontWeight: FontWeight.bold)),
+              subtitle: Text(lastMessage, maxLines: 1, overflow: TextOverflow.ellipsis),
+              trailing: const Icon(Icons.chevron_right, size: 16, color: Colors.grey),
+              onTap: () async {
+                 String? token = await _storage.read(key: 'auth_token');
+                 if (context.mounted && token != null) {
+                   Navigator.push(
+                     context,
+                     MaterialPageRoute(
+                       builder: (context) => ChatScreen(
+                         receiverName: contactName,
+                         receiverId: receiverId,
+                         token: token,
+                         baseUrl: _baseUrl,
+                       ),
+                     ),
+                   ).then((_) => _fetchConversations());
+                 }
+              },
+            );
+          },
+        ),
+      );
     }
 
-    return RefreshIndicator(
-      onRefresh: _fetchConversations,
-      child: ListView.builder(
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        itemCount: _conversations.length,
-        itemBuilder: (context, index) {
-          final conv = _conversations[index];
-          String contactName = conv['contact_name'] ?? 'Usuario';
-          String lastMessage = conv['last_message'] ?? '...';
-          
-          return ListTile(
-            leading: CircleAvatar(
-              backgroundColor: Theme.of(context).colorScheme.primary.withOpacity(0.2),
-              child: const Icon(Icons.person, color: Colors.black54),
-            ),
-            title: Text(contactName, style: const TextStyle(fontWeight: FontWeight.bold)),
-            subtitle: Text(lastMessage, maxLines: 1, overflow: TextOverflow.ellipsis),
-            trailing: const Icon(Icons.chevron_right, size: 16, color: Colors.grey),
-            onTap: () async {
-               String? token = await _storage.read(key: 'auth_token');
-               if (context.mounted && token != null) {
-                 Navigator.push(
-                   context,
-                   MaterialPageRoute(
-                     builder: (context) => ChatScreen(
-                       receiverName: contactName,
-                       token: token,
-                       baseUrl: _baseUrl,
-                     ),
-                   ),
-                 );
-               }
-            },
-          );
-        },
+    return Scaffold(
+      body: content,
+      floatingActionButton: FloatingActionButton(
+        backgroundColor: Theme.of(context).colorScheme.primary,
+        foregroundColor: Colors.white,
+        onPressed: () => _showNewChatModal(context),
+        child: const Icon(Icons.chat),
       ),
     );
   }
@@ -3198,12 +3402,14 @@ class _CreateExperienceScreenState extends State<CreateExperienceScreen> {
 // -----------------------------------------------------------------
 class ChatScreen extends StatefulWidget {
   final String receiverName;
+  final dynamic receiverId; // ID del destinatario (turista o prestador)
   final String token;
   final String baseUrl;
 
   const ChatScreen({
     super.key,
     required this.receiverName,
+    required this.receiverId,
     required this.token,
     required this.baseUrl,
   });
@@ -3213,10 +3419,13 @@ class ChatScreen extends StatefulWidget {
 }
 
 class _ChatScreenState extends State<ChatScreen> {
-  final TextEditingController _messageController = TextEditingController();
   final Dio _dio = Dio();
+  final TextEditingController _messageController = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
+  
   List<dynamic> _messages = [];
   bool _loading = true;
+  bool _sending = false;
 
   @override
   void initState() {
@@ -3224,42 +3433,80 @@ class _ChatScreenState extends State<ChatScreen> {
     _fetchMessages();
   }
 
+  // 1. Obtener mensajes (GET /messages)
   Future<void> _fetchMessages() async {
     try {
       final response = await _dio.get(
         '${widget.baseUrl}/messages',
-        options: Options(headers: {'Authorization': 'Bearer ${widget.token}'}),
+        queryParameters: {
+          'receiver_id': widget.receiverId, // Envía el ID para filtrar el chat
+        },
+        options: Options(headers: {
+          'Authorization': 'Bearer ${widget.token}',
+          'Accept': 'application/json',
+        }),
       );
-      if (response.statusCode == 200) {
+
+      if (response.statusCode == 200 && mounted) {
         setState(() {
           _messages = response.data is List ? response.data : (response.data['data'] ?? []);
           _loading = false;
         });
+        _scrollToBottom();
       }
     } catch (e) {
-      setState(() => _loading = false);
-      debugPrint('Error cargando mensajes: $e');
+      debugPrint('Error al obtener mensajes: $e');
+      if (mounted) setState(() => _loading = false);
     }
   }
 
+  // 2. Enviar mensaje (POST /messages)
   Future<void> _sendMessage() async {
-    if (_messageController.text.trim().isEmpty) return;
-
     String text = _messageController.text.trim();
-    _messageController.clear();
+    if (text.isEmpty || _sending) return;
+
+    setState(() => _sending = true);
 
     try {
-      await _dio.post(
+      final response = await _dio.post(
         '${widget.baseUrl}/messages',
-        data: {'message': text, 'receiver_name': widget.receiverName},
-        options: Options(headers: {'Authorization': 'Bearer ${widget.token}'}),
+        data: {
+          'receiver_id': widget.receiverId, // ID a quien le llega el mensaje
+          'message': text,                   // Contenido (o 'content' según tu DB)
+        },
+        options: Options(headers: {
+          'Authorization': 'Bearer ${widget.token}',
+          'Accept': 'application/json',
+        }),
       );
-      _fetchMessages();
+
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        _messageController.clear();
+        // Recargar el chat para mostrar el mensaje recién guardado en DB
+        await _fetchMessages(); 
+      }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Error al enviar mensaje'), backgroundColor: Colors.red),
-      );
+      debugPrint('Error al enviar mensaje: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Error al enviar el mensaje')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _sending = false);
     }
+  }
+
+  void _scrollToBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
+    });
   }
 
   @override
@@ -3272,51 +3519,83 @@ class _ChatScreenState extends State<ChatScreen> {
       ),
       body: Column(
         children: [
+          // Área de historial de mensajes
           Expanded(
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
                 : _messages.isEmpty
-                    ? const Center(child: Text('Envía tu primer mensaje para iniciar la conversación.'))
+                    ? const Center(
+                        child: Text(
+                          'Envía tu primer mensaje para iniciar la conversación.',
+                          style: TextStyle(color: Colors.grey),
+                        ),
+                      )
                     : ListView.builder(
+                        controller: _scrollController,
                         padding: const EdgeInsets.all(16),
                         itemCount: _messages.length,
                         itemBuilder: (context, index) {
                           final msg = _messages[index];
+                          // Comprueba si el mensaje lo envió el usuario actual
+                          bool isMe = msg['sender_id'].toString() != widget.receiverId.toString();
+
                           return Align(
-                            alignment: Alignment.centerRight,
+                            alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
                             child: Container(
                               margin: const EdgeInsets.symmetric(vertical: 4),
-                              padding: const EdgeInsets.all(12),
+                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                               decoration: BoxDecoration(
-                                color: Theme.of(context).colorScheme.primary.withOpacity(0.15),
-                                borderRadius: BorderRadius.circular(12),
+                                color: isMe 
+                                    ? Theme.of(context).colorScheme.primary 
+                                    : Colors.grey[200],
+                                borderRadius: BorderRadius.circular(16),
                               ),
-                              child: Text(msg['message'] ?? msg['contenido'] ?? ''),
+                              child: Text(
+                                msg['message'] ?? msg['content'] ?? '',
+                                style: TextStyle(
+                                  color: isMe ? Colors.white : Colors.black87,
+                                  fontSize: 15,
+                                ),
+                              ),
                             ),
                           );
                         },
                       ),
           ),
+
+          // Campo de texto para enviar
           Container(
-            padding: const EdgeInsets.all(8),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             color: Colors.white,
-            child: Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _messageController,
-                    decoration: const InputDecoration(
-                      hintText: 'Escribe un mensaje...',
-                      border: InputBorder.none,
-                      contentPadding: EdgeInsets.symmetric(horizontal: 16),
+            child: SafeArea(
+              child: Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _messageController,
+                      decoration: InputDecoration(
+                        hintText: 'Escribe un mensaje...',
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(24),
+                        ),
+                      ),
+                      onSubmitted: (_) => _sendMessage(),
                     ),
                   ),
-                ),
-                IconButton(
-                  icon: Icon(Icons.send, color: Theme.of(context).colorScheme.primary),
-                  onPressed: _sendMessage,
-                ),
-              ],
+                  const SizedBox(width: 8),
+                  IconButton(
+                    icon: _sending 
+                        ? const SizedBox(
+                            width: 20, 
+                            height: 20, 
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : Icon(Icons.send, color: Theme.of(context).colorScheme.primary),
+                    onPressed: _sendMessage,
+                  ),
+                ],
+              ),
             ),
           ),
         ],
